@@ -10,7 +10,13 @@ ui::debug_fp destroy "$0"
 START_TS=$(ui::ts)
 START_MS=$(ui::epoch_ms)
 ui::info destroy "----- start: ${START_TS} -----"
-__af_end() { local __end_ms=$(ui::epoch_ms); local __diff=$((__end_ms-START_MS)); ui::info destroy "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"; }
+__af_end() {
+  local __end_ms
+  __end_ms="$(ui::epoch_ms)"
+  local __diff
+  __diff=$((__end_ms-START_MS))
+  ui::info destroy "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"
+}
 trap __af_end EXIT
 
 YES="false"

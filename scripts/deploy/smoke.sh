@@ -10,7 +10,13 @@ ui::debug_fp smoke "$0"
 START_TS=$(ui::ts)
 START_MS=$(ui::epoch_ms)
 ui::info smoke "----- start: ${START_TS} -----"
-__af_end() { local __end_ms=$(ui::epoch_ms); local __diff=$((__end_ms-START_MS)); ui::info smoke "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"; }
+__af_end() {
+  local __end_ms
+  __end_ms="$(ui::epoch_ms)"
+  local __diff
+  __diff=$((__end_ms-START_MS))
+  ui::info smoke "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"
+}
 trap __af_end EXIT
 
 # 既定は小さめで安定したCDNを使用（外部取得遅延での誤検知を避ける）

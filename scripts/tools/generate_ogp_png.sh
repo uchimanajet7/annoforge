@@ -18,7 +18,13 @@ PNG_PATH="web/ogp.png"
 START_TS=$(ui::ts)
 START_MS=$(ui::epoch_ms)
 ui::info ogp "----- start: ${START_TS} -----"
-__af_end() { local __end_ms=$(ui::epoch_ms); local __diff=$((__end_ms-START_MS)); ui::info ogp "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"; }
+__af_end() {
+  local __end_ms
+  __end_ms="$(ui::epoch_ms)"
+  local __diff
+  __diff=$((__end_ms-START_MS))
+  ui::info ogp "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"
+}
 trap __af_end EXIT
 
 # usage対応（-h|--help）

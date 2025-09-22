@@ -12,7 +12,13 @@ ui::debug_fp layer "$0"
 START_TS=$(ui::ts)
 START_MS=$(ui::epoch_ms)
 ui::info layer "----- start: ${START_TS} -----"
-__af_end() { local __end_ms=$(ui::epoch_ms); local __diff=$((__end_ms-START_MS)); ui::info layer "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"; }
+__af_end() {
+  local __end_ms
+  __end_ms="$(ui::epoch_ms)"
+  local __diff
+  __diff=$((__end_ms-START_MS))
+  ui::info layer "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"
+}
 trap __af_end EXIT
 
 # 既定値（安定・再現性重視）
@@ -73,7 +79,7 @@ fi
 ui::hdr layer "Pillow レイヤー作成"
 ui::info layer "Pillow==${VERSION} / ${PLATFORM} でレイヤーを作成します"
 
-WORKDIR="$(pwd)"
+# WORKDIR は未使用のため保持しません（SC2034回避）
 OUTPUT_DIR="${ROOT_DIR}/infra/terraform/build"
 OUTPUT_PATH="${OUTPUT_DIR}/pillow-layer.zip"
 mkdir -p "${OUTPUT_DIR}"

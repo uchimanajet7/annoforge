@@ -6,7 +6,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/../lib/ui.sh"; ui::init
 ui::debug_fp with_aws "$0"
 
@@ -14,7 +13,13 @@ ui::debug_fp with_aws "$0"
 START_TS=$(ui::ts)
 START_MS=$(ui::epoch_ms)
 ui::info with_aws "----- start: ${START_TS} -----"
-__af_end() { local __end_ms=$(ui::epoch_ms); local __diff=$((__end_ms-START_MS)); ui::info with_aws "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"; }
+__af_end() {
+  local __end_ms
+  __end_ms="$(ui::epoch_ms)"
+  local __diff
+  __diff=$((__end_ms-START_MS))
+  ui::info with_aws "----- end: $(ui::ts) (elapsed=$(ui::fmt_elapsed_ms "${__diff}")) -----"
+}
 trap __af_end EXIT
 
 MODE="profile"       # profile | auth（既定: profile）
