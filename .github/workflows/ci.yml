@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: ShellCheck (scripts/**/*.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files 'scripts/**/*.sh')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No shell scripts under scripts/. Skipping."
+          else
+            echo "Checking ${#files[@]} shell scripts..."
+            shellcheck -S warning "${files[@]}"
+          fi
+
+  terraform:
+    name: Terraform fmt/validate (infra/terraform)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      - name: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (no backend)
+        working-directory: infra/terraform
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: infra/terraform
+        run: terraform validate -no-color
+

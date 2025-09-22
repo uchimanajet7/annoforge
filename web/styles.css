@@ -1,0 +1,431 @@
+/* リポジトリ再編により web/ 配下へ移動 */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #333;
+  background-color: #f5f5f5;
+  padding: 20px;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 20px;
+  color: #2c3e50;
+}
+
+h2 {
+  margin-top: 10px;
+  margin-bottom: 15px;
+  color: #2c3e50;
+  font-size: 1.2rem;
+}
+
+.controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  align-items: center;
+}
+
+.controls-below {
+  margin-top: 10px;
+  justify-content: center;
+}
+
+.controls-top {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.tool-buttons { display: flex; gap: 6px; }
+.tool-btn {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.tool-btn.active { outline: 2px solid #3498db; background: #e9f5fc; }
+
+.color-controls { display: flex; align-items: center; gap: 8px; }
+.swatches { display: flex; gap: 6px; }
+.color-swatch {
+  width: 18px; height: 18px; border-radius: 3px; border: 1px solid #bbb; cursor: pointer;
+}
+.color-swatch.active { outline: 2px solid #3498db; }
+.file-controls { display: flex; align-items: center; gap: 6px; }
+.file-label { font-size: 0.9rem; color: #2c3e50; }
+.file-pick-btn { background: #fff; color: #2c3e50; border: 1px solid #ccc; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+.file-pick-btn:hover { background: #f5f7fa; }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+
+.controls .tool-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls .action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#imageInput {
+  flex: 1;
+  padding: 8px;
+}
+
+button {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+button:hover {
+  background-color: #2980b9;
+}
+
+.canvas-container {
+  position: relative;
+  margin-bottom: 20px;
+  border: 1px solid #ddd;
+  overflow: hidden;
+}
+
+#stageContainer {
+  display: block;
+  width: 100%;
+  background-color: #eee;
+  cursor: crosshair;
+}
+#stageContainer.drop-active {
+  outline: 3px dashed #3498db;
+  outline-offset: -3px;
+}
+
+.floating-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 3000; /* 他要素より常に前面 */
+  pointer-events: auto;
+}
+.floating-zoom .zoom-btn,
+.floating-zoom .tool-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid #ccc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+.floating-zoom .tool-btn.active { outline: 2px solid #3498db; background: #e9f5fc; }
+
+#coordinates {
+  position: absolute;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 5px 10px;
+  border-radius: 3px;
+  font-size: 14px;
+  display: none;
+  bottom: -5px;
+  left: 10px;
+  right: auto;
+  top: auto;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.status-bar {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 1001;
+  pointer-events: none;
+  display: none; /* ヒント発火時のみ表示 */
+}
+
+.zoom-badge {
+  margin-top: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 10px;
+  background: #2c3e50;
+  color: #fff;
+  text-align: center;
+}
+
+.annotations {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 5px;
+}
+
+.annotations-header {
+  margin-bottom: 15px;
+}
+
+#annotationList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* セクションヘッダー（中央タイトル＋右アクション） */
+.section-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.section-title {
+  justify-self: center;
+  margin: 0;
+  color: #2c3e50;
+}
+.section-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-spacer { height: 1px; }
+
+.annotation-item {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+  width: calc(33.333% - 10px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  position: relative;
+}
+
+.annotation-item:hover {
+  background-color: #f0f0f0;
+}
+
+.delete-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.delete-btn:hover {
+  background-color: #c0392b;
+}
+
+.copy-notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: #2ecc71;
+  color: white;
+  padding: 10px 20px;
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  z-index: 2000;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.copy-notification.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 現在の画像名表示 */
+.image-name {
+  margin-left: 8px;
+  max-width: 320px;
+  color: #2c3e50;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .annotation-item {
+    width: calc(50% - 10px);
+  }
+}
+
+.json-display-container {
+  margin-top: 20px;
+  border-top: 1px solid #ddd;
+  padding-top: 15px;
+}
+
+.json-display {
+  background-color: #f1f1f1;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+  font-family: monospace;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* モーダル */
+.modal { display: none; }
+.modal.show { display: block; }
+.modal .modal__overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1500;
+}
+.modal .modal__content {
+  position: fixed; z-index: 1501; left: 50%; top: 10%; transform: translateX(-50%);
+  width: min(900px, 92vw); background: #fff; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.modal__header { display:flex; align-items:center; justify-content: space-between; padding: 12px 16px; border-bottom:1px solid #eee; }
+.modal__body { padding: 16px; }
+.modal__footer { display:flex; gap:8px; justify-content:flex-end; padding: 12px 16px; border-top:1px solid #eee; }
+.modal__close { background:#fff; border:1px solid #ccc; border-radius:4px; padding:0; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:#2c3e50; }
+.modal__close:hover { background:#f5f7fa; }
+.modal__close svg { width:18px; height:18px; }
+
+.import-grid { display:grid; grid-template-columns: 1fr 260px; gap: 12px; }
+#importJsonText { width:100%; height: 260px; font-family: monospace; font-size: 13px; padding: 8px; border:1px solid #ccc; border-radius:4px; }
+.import-side { display:flex; flex-direction:column; gap:8px; }
+.import-toolbar { display:flex; justify-content:flex-end; margin-bottom:6px; }
+.dropzone { border:2px dashed #bbb; border-radius:6px; padding: 20px; text-align:center; color:#666; }
+.dropzone.active { border-color:#3498db; color:#3498db; background:#f0f8ff; }
+.import-summary { font-size: 0.9rem; color:#2c3e50; min-height: 1.2em; }
+.modal__footer .secondary { background:#fff; color:#2c3e50; border:1px solid #ccc; }
+.modal__footer .secondary:hover { background:#f5f7fa; }
+
+/* アイコンボタン（統一スタイル） */
+.icon-btn {
+  background:#fff;
+  border:1px solid #ccc;
+  border-radius:4px;
+  width:32px; height:32px;
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:0; cursor:pointer;
+}
+.icon-btn:hover { background:#f5f7fa; }
+.icon-btn svg { pointer-events:none; }
+
+@media (max-width: 720px) {
+  .import-grid { grid-template-columns: 1fr; }
+  #importJsonText { height: 200px; }
+}
+
+.json-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#jsonInput {
+  width: 100%;
+  min-height: 120px;
+  font-family: monospace;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.json-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:hover {
+  background: #f3f3f3;
+}
+
+@media (max-width: 480px) {
+  .annotation-item {
+    width: 100%;
+  }
+
+  .controls {
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+/* フッター（名称表記のみ、軽量レイアウト） */
+.footer {
+  margin-top: 16px;
+  text-align: center;
+  color: #667085;
+  font-size: 12px;
+}

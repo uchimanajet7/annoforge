@@ -1,0 +1,27 @@
+# OS/エディタ
+.DS_Store
+
+# Python 仮想環境/ビルドキャッシュ
+.venv/
+__pycache__/
+*.pyc
+
+# Terraform 作業生成物
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/tfplan
+infra/terraform/build/
+
+# 生成物（追跡しない・一時生成の安全除外）
+# - レイヤZIPは infra/terraform/build/ に一元化（単体除外は不要）
+# - ビルド時の一時資材（失敗時に残っても誤追跡しないよう予防）
+/.venv-build-layer
+/python
+scripts/deploy/.venv-build-layer
+scripts/deploy/python
+
+# ドラフトやローカルのみは追跡しない
+docs/_drafts_
+docs/_local_
+image/_local_
+/_AI-VIOLATIONS_.md
