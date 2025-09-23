@@ -40,16 +40,23 @@ ui::_tag() {
   printf "%b[%s]%b" "$open" "$tag" "$close"
 }
 
+ui::_out() {
+  if [[ -r /dev/tty ]]; then printf '%s' "/dev/tty"; return; fi
+  if [[ -t 2 ]]; then printf '%s' "/dev/stderr"; return; fi
+  if [[ -t 1 ]]; then printf '%s' "/dev/stdout"; return; fi
+  printf '%s' "/dev/stderr"
+}
+
 ui::hdr()   { # $1=tag $2=msg
-  local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"
+  local out; out="$(ui::_out)"
   ui::_tag "$1" blue 1 >"$out"; printf " %s\n" "$2" >"$out";
 }
-ui::info()  { local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"; ui::_tag "$1" dim 0 >"$out"; printf " %s\n" "$2" >"$out"; }
-ui::ok()    { local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"; ui::_tag "$1" green 0 >"$out"; printf " %s\n" "$2" >"$out"; }
-ui::warn()  { local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"; ui::_tag "$1" yellow 0 >"$out"; printf " %s\n" "$2" >"$out"; }
-ui::err()   { local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"; ui::_tag "$1" red 1 >"$out"; printf " %s\n" "$2" >"$out"; }
+ui::info()  { local out; out="$(ui::_out)"; ui::_tag "$1" dim 0 >"$out"; printf " %s\n" "$2" >"$out"; }
+ui::ok()    { local out; out="$(ui::_out)"; ui::_tag "$1" green 0 >"$out"; printf " %s\n" "$2" >"$out"; }
+ui::warn()  { local out; out="$(ui::_out)"; ui::_tag "$1" yellow 0 >"$out"; printf " %s\n" "$2" >"$out"; }
+ui::err()   { local out; out="$(ui::_out)"; ui::_tag "$1" red 1 >"$out"; printf " %s\n" "$2" >"$out"; }
 ui::run()   { # $1=tag $2=command shown
-  local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"; ui::_tag "$1" dim 0 >"$out"; printf " run: %s\n" "$2" >"$out"; }
+  local out; out="$(ui::_out)"; ui::_tag "$1" dim 0 >"$out"; printf " run: %s\n" "$2" >"$out"; }
 
 # デバッグ出力（DEPLOY_DEBUG=1 のときのみ表示）
 ui::debug() { # $1=tag $2=message
@@ -161,7 +168,7 @@ ui::debug_fp() {
 ui::ask() { # $1=__varname $2=tag $3=prompt $4=default
   local __var="$1"; shift; local tag="$1"; shift; local prompt="$1"; shift; local def="${1:-}"
   local suffix=""; [[ -n "$def" ]] && suffix=" [${def}]"
-  local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"
+  local out; out="$(ui::_out)"
   ui::_tag "$tag" cyan 1 >"$out"; printf " %s%s: " "$prompt" "$suffix" >"$out"
   local ans
   if [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi
@@ -175,7 +182,7 @@ ui::ask() { # $1=__varname $2=tag $3=prompt $4=default
 # - 使い所: 既定値を匂わせたくないが、Enterで既定を採用させたいケース
 ui::ask_silent() { # $1=__varname $2=tag $3=prompt $4=default
   local __var="$1"; shift; local tag="$1"; shift; local prompt="$1"; shift; local def="${1:-}"
-  local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"
+  local out; out="$(ui::_out)"
   ui::_tag "$tag" cyan 1 >"$out"; printf " %s: " "$prompt" >"$out"
   local ans
   if [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi
@@ -186,7 +193,7 @@ ui::ask_silent() { # $1=__varname $2=tag $3=prompt $4=default
 ui::ask_yesno() { # $1=__varname(bool) $2=tag $3=prompt $4=default(Y/N)
   local __var="$1"; shift; local tag="$1"; shift; local prompt="$1"; shift; local defYN="${1:-N}"
   local hint="[y/N]"; [[ "$defYN" =~ ^[Yy]$ ]] && hint="[Y/n]"
-  local out="/dev/tty"; [[ -t 2 ]] && out="/dev/stderr"
+  local out; out="$(ui::_out)"
   ui::_tag "$tag" cyan 1 >"$out"; printf " %s %s: " "$prompt" "$hint" >"$out"
   local ans; if [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi; ans="${ans:-$defYN}"
   case "$ans" in Y|y|Yes|yes) printf -v "$__var" 'true';; *) printf -v "$__var" 'false';; esac
