@@ -15,7 +15,8 @@ python3 --version
 ```
 
 ## 1) UI をすぐ試す
-- オンライン: GitHub Pages で `web/` を公開（初回のみリポジトリ設定で有効化が必要）。公開 URL は README に追記されます。
+- オンライン: 公開URL（GitHub Pages）: https://uchimanajet7.github.io/annoforge/
+  - 備考: 初回のみ、リポジトリ設定で Pages を有効化する必要があります（手順は下記 1.1 参照）。
 - ローカル: `web/index.html` をブラウザで開く（機能は同等）。
 
 操作の要点（抜粋）
@@ -36,6 +37,12 @@ python3 --version
     - `permissions: { contents: read, pages: write, id-token: write }` を job レベルにも付与
   - フォーク由来の pull_request では GITHUB_TOKEN が read-only となるため、Pages へのデプロイは push: main 等の信頼コンテキストで実施してください。
   - 参考: https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+
+#### 公開URLの確認方法（他の手段）
+- リポジトリ Settings → Pages に表示される URL
+- Actions → Pages ワークフロー → Deploy ステップの出力（`page_url`）
+- リポジトリの Environments → `github-pages` → View deployment
+- 既定パターン（プロジェクトページ）: `https://<owner>.github.io/<repo>/`
 
 ## 2) API を最短デプロイ
 - 対話（推奨）

@@ -2,6 +2,9 @@
 
 画像アノテーション WebUI + Lambda API
 
+公開サイト（GitHub Pages）
+- https://uchimanajet7.github.io/annoforge/
+
 AnnoForge は、WebUIで定義したアノテーション（線・矩形・多角形・平行四辺形・円）を、AWS Lambda（Python 3.13 + SnapStart）上のAPIで画像に描画し、S3へ保存してpresigned URLを返すツールです。
 
 ## UI クイックスタート
