@@ -111,6 +111,20 @@ bash scripts/tools/lint_shell.sh --strict \
 - 出力/カラー方針（CI は無色、UI 側で色付け）は `docs/SPEC.md` に明記。
 - 方針決定の記録: `docs/_local_/ADR-0001-ci-ssot.md`
 
+## 6.5) GitHub Pages（Actions）初回有効化と権限（重要）
+- 症状: `actions/configure-pages@v5` の `with: enablement: true` が 403（Resource not accessible by integration）で失敗する。
+- 原因: 未有効のリポで「Pages サイトの新規作成」を GITHUB_TOKEN で行うと権限不足となるため（管理系API）。
+- 対処（推奨・一度だけ）
+  1) GitHub → Settings → Pages → Build and deployment → Source: 「GitHub Actions」を選択 → Save
+  2) 以後は `configure-pages@v5 → upload-pages-artifact@v3 → deploy-pages@v4` でデプロイ可能
+  3) 既に有効化済みなら、`with: enablement: true` は不要（削除推奨）
+- 権限（最小）
+  - ワークフロー/ジョブに `permissions: { contents: read, pages: write, id-token: write }`
+  - pull_request（フォーク）では GITHUB_TOKEN は既定で read-only → デプロイは push: main 等で実行
+- 参考
+  - Using custom workflows with GitHub Pages: https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+  - REST: Create a GitHub Pages site: https://docs.github.com/en/rest/pages/pages#create-a-github-pages-site
+
 ## 7) 次のステップ
 - デプロイ/スモークは `docs/GETTING_STARTED.md` の手順へ。
 
