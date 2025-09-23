@@ -38,6 +38,8 @@ jobs:
   terraform:
     name: Terraform fmt/validate (infra/terraform)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,8 +49,22 @@ jobs:
         with:
           terraform_version: 1.5.7
 
-      - name: terraform fmt -check -recursive
-        run: terraform fmt -check -recursive
+      - name: terraform fmt (auto-fix on push)
+        if: github.event_name == 'push'
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -recursive
+          if ! git diff --quiet; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "ci: terraform fmt (auto-fix)"
+            git push
+          fi
+
+      - name: terraform fmt -check -recursive (with diff)
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive -diff
 
       - name: terraform init (no backend)
         working-directory: infra/terraform
@@ -57,4 +73,3 @@ jobs:
       - name: terraform validate
         working-directory: infra/terraform
         run: terraform validate -no-color
-
