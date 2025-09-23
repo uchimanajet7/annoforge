@@ -46,6 +46,14 @@ bash scripts/deploy/with_aws.sh -- bash scripts/deploy/smoke.sh
 
 構成仕様・API仕様は `docs/SPEC.md` にまとまっています。
 
+## Developer Setup (macOS)
+- 開発者向けのローカルセットアップとCI相当チェック手順: `docs/DEV_SETUP.md`
+- 例（Shell/Bash検査, Terraform整形チェック）
+```
+bash scripts/tools/lint_shell.sh --strict
+bash scripts/tools/fmt_terraform.sh --check
+```
+
 ## Community & Support
 - はじめに（最短導線）: `docs/GETTING_STARTED.md`
 

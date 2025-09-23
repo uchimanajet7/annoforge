@@ -337,6 +337,21 @@
   - 自動コミット権限は Terraform ジョブに限定。Pages/他ジョブへは付与しない。
   - fork からの PR では `contents: write` は無効化されるため自動コミットは発生しない（チェックのみ）。
 
+#### 共有スクリプト（SSOT）の採用
+- CI とローカルの挙動を一致させるため、以下を scripts/tools/ に配置し、CI はこれらを呼び出すのみとする（方針合意、実装はPRP‑004で行う）。
+  - `lint_shell.sh` … ShellCheck 実行（`--strict` でエラー化）
+  - `fmt_terraform.sh` … `--check|--write|--validate` を受け付ける統合スクリプト（作業ディレクトリは `infra/terraform`）
+- 理由: DRY/SSOT・再現性・ベンダーロック最小化。Pages のみ GitHub 固有のため例外。
+
+#### 出力/カラー方針（Why）
+- 目的: CIログの機械可読性（検索性・注釈化・差分の明瞭化）と環境差の排除。
+- ルール:
+  - Terraform は CI では常に無色出力（`-no-color`）。TTY 判定に左右されず、同一表現で比較できる。
+  - 人向けの可読性はシェルUI（`ui::info/ui::ok/ui::err`）側で担保する。
+- 代替/拡張:
+  - 共通変数 `NO_COLOR=1` や `TF_CLI_ARGS="-no-color"` も利用可能。
+  - 将来、ローカルのみカラーを許す場合は scripts/tools へ色制御フラグ（`--color auto|always|never`）を追加する。
+
 ---
 
 ## 第3部: インフラ/IaC 仕様（Terraform）

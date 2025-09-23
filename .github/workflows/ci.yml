@@ -23,17 +23,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
-      - name: Run ShellCheck
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t files < <(git ls-files 'scripts/**/*.sh')
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No shell scripts under scripts/. Skipping."
-          else
-            echo "Checking ${#files[@]} shell scripts..."
-            shellcheck -S warning "${files[@]}"
-          fi
+      - name: Run ShellCheck (strict)
+        run: bash scripts/tools/lint_shell.sh --strict
 
   terraform:
     name: Terraform fmt/validate (infra/terraform)
@@ -51,9 +42,8 @@ jobs:
 
       - name: terraform fmt (auto-fix on push)
         if: github.event_name == 'push'
-        working-directory: infra/terraform
         run: |
-          terraform fmt -recursive
+          bash scripts/tools/fmt_terraform.sh --write
           if ! git diff --quiet; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -63,13 +53,7 @@ jobs:
           fi
 
       - name: terraform fmt -check -recursive (with diff)
-        working-directory: infra/terraform
-        run: terraform fmt -check -recursive -diff
+        run: bash scripts/tools/fmt_terraform.sh --check
 
       - name: terraform init (no backend)
-        working-directory: infra/terraform
-        run: terraform init -backend=false -input=false
-
-      - name: terraform validate
-        working-directory: infra/terraform
-        run: terraform validate -no-color
+        run: bash scripts/tools/fmt_terraform.sh --validate
