@@ -324,6 +324,19 @@
 
 本仕様（第2部: Lambda API）が問題なければ「承認」とご返信ください。承認後、リポジトリ再編（`web/`, `lambda/`）とサーバ実装に着手します。
 
+
+### CI ポリシー（整形と静的検査）
+- 目的: 人手のローカル整形を不要にし、main/PR を常時グリーンに保つ。
+- 発火条件: push / pull_request / workflow_dispatch。
+  - push: `infra/terraform` で `terraform fmt -recursive` を自動適用し、差分があれば bot 署名で自動コミット（当該ジョブのみ `permissions.contents: write`）。
+  - PR: 自動整形は行わず、`terraform fmt -check -recursive -diff` の結果だけを出力。
+- 失敗基準:
+  - ShellCheck: scripts/**/*.sh は警告・エラーとも許容しない（ゼロ警告）。
+  - Terraform: `fmt -check` 不整合、`validate` エラーで失敗。
+- セキュリティ/最小権限:
+  - 自動コミット権限は Terraform ジョブに限定。Pages/他ジョブへは付与しない。
+  - fork からの PR では `contents: write` は無効化されるため自動コミットは発生しない（チェックのみ）。
+
 ---
 
 ## 第3部: インフラ/IaC 仕様（Terraform）

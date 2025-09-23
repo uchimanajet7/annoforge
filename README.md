@@ -47,12 +47,9 @@ bash scripts/deploy/with_aws.sh -- bash scripts/deploy/smoke.sh
 構成仕様・API仕様は `docs/SPEC.md` にまとまっています。
 
 ## Community & Support
-- セキュリティ（脆弱性報告）: `SECURITY.md`
-- サポート/問い合わせ: `SUPPORT.md`
 - はじめに（最短導線）: `docs/GETTING_STARTED.md`
 
 ## References
-- 公開準備と受入基準: `docs/PUBLISH_READINESS.md`
 - デプロイ手順・トラブルシュート: `docs/DEPLOY.md`
 - 仕様（構成/ラッパー仕様/API）: `docs/SPEC.md`
 - バージョン運用・採用バージョン: `docs/VERSIONS.md`
