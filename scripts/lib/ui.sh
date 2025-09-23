@@ -41,7 +41,10 @@ ui::_tag() {
 }
 
 ui::_out() {
-  if [[ -r /dev/tty ]]; then printf '%s' "/dev/tty"; return; fi
+  # /dev/tty を使うのは「制御端末がある（-t 0/1/2 のいずれか真）」場合に限定する
+  if [[ -t 2 || -t 1 || -t 0 ]]; then
+    if [[ -r /dev/tty ]]; then printf '%s' "/dev/tty"; return; fi
+  fi
   if [[ -t 2 ]]; then printf '%s' "/dev/stderr"; return; fi
   if [[ -t 1 ]]; then printf '%s' "/dev/stdout"; return; fi
   printf '%s' "/dev/stderr"
@@ -171,7 +174,7 @@ ui::ask() { # $1=__varname $2=tag $3=prompt $4=default
   local out; out="$(ui::_out)"
   ui::_tag "$tag" cyan 1 >"$out"; printf " %s%s: " "$prompt" "$suffix" >"$out"
   local ans
-  if [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi
+  if [[ -t 2 || -t 1 || -t 0 ]] && [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi
   if [[ -z "$ans" && -n "$def" ]]; then ans="$def"; fi
   printf -v "$__var" '%s' "$ans"
 }
@@ -185,7 +188,7 @@ ui::ask_silent() { # $1=__varname $2=tag $3=prompt $4=default
   local out; out="$(ui::_out)"
   ui::_tag "$tag" cyan 1 >"$out"; printf " %s: " "$prompt" >"$out"
   local ans
-  if [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi
+  if [[ -t 2 || -t 1 || -t 0 ]] && [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi
   if [[ -z "$ans" && -n "$def" ]]; then ans="$def"; fi
   printf -v "$__var" '%s' "$ans"
 }
@@ -195,7 +198,7 @@ ui::ask_yesno() { # $1=__varname(bool) $2=tag $3=prompt $4=default(Y/N)
   local hint="[y/N]"; [[ "$defYN" =~ ^[Yy]$ ]] && hint="[Y/n]"
   local out; out="$(ui::_out)"
   ui::_tag "$tag" cyan 1 >"$out"; printf " %s %s: " "$prompt" "$hint" >"$out"
-  local ans; if [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi; ans="${ans:-$defYN}"
+  local ans; if [[ -t 2 || -t 1 || -t 0 ]] && [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi; ans="${ans:-$defYN}"
   case "$ans" in Y|y|Yes|yes) printf -v "$__var" 'true';; *) printf -v "$__var" 'false';; esac
 }
 
