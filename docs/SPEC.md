@@ -665,3 +665,45 @@ bash scripts/deploy/with_aws.sh --mode auth --base-profile default -- aws s3 ls
 - `aws configure list-profiles` の結果を配列化してメニュー表示、入力値を正規化/検証。
 - 確定後、`aws configure export-credentials --format env --profile <name>` の結果を既存の `apply_exports` に渡して `exec` 実行。
 - 失敗時は原因を出し分け（未ログイン/存在しないプロファイル/CLI v2未満等）。
+
+
+## Terraform Provider 情報出力スクリプト（show_terraform_providers.sh）
+
+### 1. 目的
+- Terraform ワークスペース（`infra/terraform` 固定）の現在ロックされているプロバイダー情報を、チーム全体で共有しやすい形で出力する。
+- `terraform init` 済みかどうかを即時判定し、未初期化時には実行者へ初期化を促す。
+- バージョンレンジ（`versions.tf`）と実際のロック値（`.terraform.lock.hcl`）の乖離を素早く検知できる状態を維持する。
+
+### 2. 対象スクリプトと配置
+- パス: `scripts/tools/show_terraform_providers.sh`
+- `scripts/tools/upgrade_terraform_providers.sh` と同じく `scripts/tools/lib/ui.sh` を利用したログ体裁を採用。
+- ワークスペースは `infra/terraform` ディレクトリに固定し、移動後にコマンドを実行する。
+
+### 3. 入出力仕様
+- 引数: なし（`-h|--help` のみサポート）。
+- 標準出力:
+  1. `terraform version` の結果（CLI・初期化済みプロバイダー版の概要）。
+  2. `terraform providers` の結果（モジュール別の要求プロバイダーと採用バージョン）。
+  3. `.terraform.lock.hcl` の内容から、`provider` / `version` / `constraints` を含む行のみをファイルの順序通りにそのまま出力（空行は原文どおり保持）。
+- 標準エラー: ログメッセージ（`ui::info`/`ui::ok`/`ui::warn`/`ui::err`）。
+- 退出コード: 正常終了で `0`。`.terraform.lock.hcl` が無い等の未初期化時は `1` を返し、初期化手順（`terraform init` または `scripts/tools/upgrade_terraform_providers.sh`）を案内。
+
+### 4. 振る舞い
+1. タイムスタンプ付きの開始/終了ログを出力（`upgrade_terraform_providers.sh` と同様のトラップ構造）。
+2. `-h|--help` の場合は使用方法を表示して終了。
+3. `infra/terraform` に移動し、`terraform` コマンドの存在を確認。無ければ明示エラー。
+4. `.terraform.lock.hcl` が存在しない場合は `ui::err` で未初期化を通知し、終了コード1で停止。
+5. `terraform version` と `terraform providers` を順に実行し、実行コマンドを `ui::run` で事前表示。
+6. `.terraform.lock.hcl` を Bash のテキスト処理で先頭から走査し、`provider` / `version` / `constraints` を含む行のみを抽出して、そのまま順に出力（出力順はファイル順、同一ブロック内の空行も保持）。
+7. 出力後に「versions.tf の制約と乖離が無いかを確認し、必要なら `upgrade_terraform_providers.sh` を実行する」旨を `ui::ok` で案内。
+
+### 5. エラーとリカバリ
+- `terraform` 未インストール: `ui::err` で不足を通知し、CLI のインストールを促す。
+- `.terraform.lock.hcl` 未存在: `ui::err` で未初期化を案内し、`terraform init` 実行を促す。
+- パース失敗（想定外フォーマット）: `ui::warn` で注意喚起し、ロックファイルを直接参照するよう案内しつつ終了コードは 0（情報出力が一部欠落するだけの場合）とする。
+
+### 6. 受け入れ基準
+- 初期化済み環境で実行すると、`terraform version` / `terraform providers` / ロックファイル行抜き出しの3部構成が表示される。
+- 未初期化環境で実行すると、`.terraform.lock.hcl` が無い旨のエラーと初期化手順が表示され、終了コード1となる。
+- 表示内で取り扱う情報は `infra/terraform` の内容に限定され、他ディレクトリを変更しない。
+- ログ出力のスタイルが既存ツール (`upgrade_terraform_providers.sh`) と同一のトーン・フォーマットとなる。
