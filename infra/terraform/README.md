@@ -40,11 +40,11 @@ docker run --rm -v "$PWD":/var/task public.ecr.aws/lambda/python:3.13-arm64 bash
 例: `infra/terraform/dev.auto.tfvars`（スクリプト利用時は `scripts/deploy/make_tfvars.sh` が自動生成）
 
 ```hcl
-aws_region                    = "ap-northeast-1"
+aws_region                    = "<AWS_REGION>"
 architecture                  = "arm64"        # 既定はarm64（x86_64も可。レイヤと揃える）
 function_name                 = "annoforge-api"
-output_bucket                 = "your-output-bucket"     # Terraformがこのバケットを作成（SSE-S3, PublicAccessBlock, force_destroy）
-output_prefix                 = "results"
+output_bucket                 = "<OUTPUT_BUCKET>"     # Terraformがこのバケットを作成（SSE-S3, PublicAccessBlock, force_destroy）
+output_prefix                 = "<OUTPUT_PREFIX>"
 result_format                 = "png"
 presign_ttl_default_seconds   = 3600
 presign_ttl_max_seconds       = 86400

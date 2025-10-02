@@ -187,12 +187,12 @@ zip -r infra/terraform/build/pillow-layer.zip python
 
 4-2) tfvars作成（例: infra/terraform/dev.auto.tfvars）
 ```
-aws_region                  = "ap-northeast-1"
+aws_region                  = "<AWS_REGION>"
 architecture                = "arm64"
 function_name               = "annoforge-api"
 alias_name                  = "prod"
-output_bucket               = "<your-output-bucket>"   # Terraformがこのバケットを作成
-output_prefix               = "results"
+output_bucket               = "<OUTPUT_BUCKET>"   # Terraformがこのバケットを作成
+output_prefix               = "<OUTPUT_PREFIX>"
 result_format               = "png"
 presign_ttl_default_seconds = 3600
 presign_ttl_max_seconds     = 86400

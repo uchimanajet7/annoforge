@@ -11,6 +11,7 @@ infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/terraform/tfplan
 infra/terraform/build/
+infra/terraform/*.auto.tfvars
 
 # 生成物（追跡しない・一時生成の安全除外）
 # - レイヤZIPは infra/terraform/build/ に一元化（単体除外は不要）
