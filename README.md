@@ -33,12 +33,12 @@ bash scripts/deploy/with_aws.sh --mode profile --profile <WORK_PROFILE> -- bash 
 bash scripts/deploy/with_aws.sh -- bash scripts/deploy/smoke.sh
 ```
 
-関連ドキュメント（詳細）
+関連ドキュメント
 - デプロイ手順・トラブルシュート: `docs/DEPLOY.md`
 - 仕様（構成/ラッパー仕様/API）: `docs/SPEC.md`
 - バージョン運用: `docs/VERSIONS.md`
 
-## 認証方針と背景（要約）
+## 認証方針と背景
 - 既定は `profile`（AWS CLI v2 プロファイル/SSO/role_arn+source_profile）。自動更新・一時認証の最新推奨に整合。
 - 例外として `auth`（AssumeRole+MFAの手動フロー）を残置。プロファイルを置けない/使えない、緊急の“その場運用”などでのみ使用。
 - 方針変更の経緯・詳細は `docs/DEPLOY.md`「付録: 認証方針変更の経緯」を参照。
@@ -58,9 +58,13 @@ bash scripts/tools/fmt_terraform.sh --check
 ```
 
 ## Community & Support
-- はじめに（最短導線）: `docs/GETTING_STARTED.md`
+- はじめに: `docs/GETTING_STARTED.md`
 
 ## References
 - デプロイ手順・トラブルシュート: `docs/DEPLOY.md`
 - 仕様（構成/ラッパー仕様/API）: `docs/SPEC.md`
 - バージョン運用・採用バージョン: `docs/VERSIONS.md`
+
+## Notes
+
+<p><a href="https://uchimanajet7.hatenablog.com/entry/2025/10/14/180000">AnnoForge 開発メモ - WebUIで注釈設定 → AWS Lambdaで画像に注釈を追加してみた</a></p>
