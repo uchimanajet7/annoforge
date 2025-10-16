@@ -30,34 +30,91 @@
 5) 動作確認（`docs/DEPLOY.md` の検証コマンド）。
 6) 破壊的変更なら `docs/CHANGELOG.md` を更新（任意運用）。
 
-## Pillow（Lambdaレイヤー）のアップグレード
+## バージョン監視と更新フロー
+
+### 監視スクリプト
+- 最新差分の取得:  
+  ```bash
+  bash scripts/tools/check_updates.sh
+  ```
+- JSON形式での取得:  
+  ```bash
+  bash scripts/tools/check_updates.sh --json
+  ```
+- 主な出力セクション:
+  - `[needs-update]`: 最新との差分あり。`action` と `doc` に従って更新。
+  - `[up-to-date]`: 現行が最新版。
+  - `[missing]`: 現行値が取得できない（ファイル未生成など）。
+  - `[unknown]`: 最新版の取得に失敗（ネットワーク等）。
+  - `[info-only]`: 自動取得対象外。リンク先を手動確認。
+
+### 対象と参照リンク
+- スクリプトは `scripts/tools/check_updates.sh` 冒頭の `targets` 定義に基づいて監視対象を判定。最新版の取得には PyPI / npm / HashiCorp Releases / AWS CLI Command Reference (`https://awscli.amazonaws.com/v2/documentation/api/latest/index.html`) / python.org / nodejs.org / curl.se / jq 公式サイトなどの一次情報を利用している。
+- 各ターゲットは以下のドキュメント節に対応する。
+  - Pillow → `#pillow`
+  - Konva → `#konva`
+  - Terraform CLI → `#terraform-cli`
+  - Terraform AWS Provider → `#terraform-aws-provider`
+  - Terraform Archive Provider → `#terraform-archive-provider`
+  - AWS Lambda Python runtime → `#aws-lambda-python-runtime`
+  - 開発環境ツール（aws-cli/python3/pip/zip/curl/jq/node） → `#開発環境ツール`
+
+## Pillow
 - 目的: セキュリティ更新/機能追加の取り込み。
-- 作業:
-  1) 目標バージョンを決定（例: `10.4.0`）。
+- アップグレード手順:
+  1) 目標バージョンを決定（例: `12.0.0`）。PyPIリリースノートを参照。
   2) `scripts/deploy/build_layer.sh --version <新バージョン|latest>` を実行し、`infra/terraform/build/pillow-layer.zip` を再生成（Python 3.13 / cp313 / manylinux2014_* を前提）。
-  3) `infra/terraform/dev.auto.tfvars` の `pillow_layer_zip_path` は `./build/pillow-layer.zip` を指定（既に指定済みなら不要）。
-  4) `terraform apply`。
-- 確認: APIにサンプルJSONをPOSTし、生成画像が得られること。
+  3) `infra/terraform/dev.auto.tfvars` の `pillow_layer_zip_path` が `./build/pillow-layer.zip` になっていることを確認。
+  4) `terraform apply` を実行。
+- 検証: APIにサンプルJSONをPOSTし、生成画像が期待通りであること。
 - 注意: ランタイム/アーキとwheelの互換（manylinux2014, aarch64/arm64, cp313）を満たすこと。
 
-## Konva（WebUI）のアップグレード
-- 作業:
-  1) `web/index.html` のCDN行のバージョンを更新。
-  2) WebUIで基本操作（各形状の作図/JSON出力）を確認。
-  3) JSONスキーマの変化がないことを確認（必要なら `docs/SPEC.md` を更新）。
+## Konva
+- CDNスクリプトのバージョンを `web/index.html` で指定。
+- バージョン更新手順:
+  1) `web/index.html` の CDN 行（`https://unpkg.com/konva@<version>`）を最新値に更新。
+  2) WebUIで各図形の作図・編集・JSON出力をスモークテスト。
+  3) JSON形式の仕様が変化していないか確認し、変更があれば `docs/SPEC.md` を更新。
 
-## Terraform Provider のアップグレード
-- 作業:
-  1) `infra/terraform/versions.tf` のProviderレンジを必要に応じて更新。
-  2) `scripts/tools/upgrade_terraform_providers.sh` を実行（`terraform init -upgrade`）。
-  3) `terraform plan` で差分確認 → `apply`。
+## Terraform CLI
+- 取得方法: `terraform version` でローカルのインストール版を確認。必要に応じて `brew upgrade terraform` などで更新。
+- 更新時は `terraform -version` の結果を記録し、`terraform plan` が成功することを確認。
+- HashiCorp Release Notes を参照し、破壊的変更が無いか事前確認する。
 
-## Lambda ランタイムのアップグレード（例: 3.13 以降）
-- 前提: SnapStartが新ランタイムをサポートしていることを確認。
-- 作業:
-  1) `infra/terraform/main.tf` の `runtime` を対象バージョンへ更新。
-  2) Pillowレイヤーを対象ABI（例: cp313）のwheelで再作成。
-  3) `terraform apply`。
+## Terraform AWS Provider
+- Terraform のロックファイル（`infra/terraform/.terraform.lock.hcl`）にピン留め。
+- 更新手順:
+  1) `infra/terraform/versions.tf` のレンジを必要に応じて調整。
+  2) `scripts/tools/upgrade_terraform_providers.sh` を実行してロック更新。
+  3) `terraform plan` で差分確認後、`terraform apply`。
+- AWS Provider のリリースノートを確認し、対象リソースの挙動変更が無いか精査する。
+
+## Terraform Archive Provider
+- AWS Provider と同様にロックファイルで管理。
+- 更新時は AWS Provider と同じ手順で `terraform init -upgrade` を実行し、`terraform plan` で確認。
+- Archive Provider の機能追加・非推奨が影響しないかをリリースノートで確認。
+
+## AWS Lambda Python runtime
+- `infra/terraform/main.tf` の `runtime` で指定 (`python3.13`)。
+- 新ランタイムが公開された場合:
+  1) AWS Docs / What's New で SnapStart 対応状況とサポート期限を確認。
+  2) `runtime` フィールドを新バージョンへ更新。
+  3) Pillow レイヤーを同じ ABI（例: cp314）で再構築。
+  4) `terraform apply` 後に Lambda Function URL でスモークテスト。
+
+## 開発環境ツール
+- `scripts/tools/check_updates.sh` は以下のローカルコマンドのバージョンも収集し、最新リリースとの差分を提示する。
+  - `aws`（AWS CLI v2）
+  - `python3`
+  - `pip`
+  - `zip`
+  - `curl`
+  - `jq`
+  - `node`
+- 更新方針:
+  - プライマリ OS が macOS の場合は Homebrew、Linux の場合はパッケージマネージャや公式インストーラを利用。
+  - 各コマンドのリリースページ（スクリプト出力の `ref`）から変更点を確認し、必要に応じて更新。
+  - 更新後は `scripts/tools/check_updates.sh` を再実行し、最新版になったことを確認。
 
 ## スモークテスト
 - `function_url` を取得し、最小JSONをPOSTして200応答・有効なpresigned URLが返ることを確認。

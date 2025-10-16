@@ -33,6 +33,11 @@ sudo apt-get update && sudo apt-get install -y terraform awscli
 bash scripts/tools/check_versions.sh
 ```
 
+最新差分確認:
+```
+bash scripts/tools/check_updates.sh
+```
+
 AWS認証:
 - 認証は認証ラッパー `with_aws.sh` に一元化します。deploy.sh は認証を行いません（プロセス環境に注入された一時クレデンシャル前提）。
 

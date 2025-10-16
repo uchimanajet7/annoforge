@@ -284,6 +284,7 @@
   - `uuid = uuid4()`、`token = secrets.token_urlsafe(16)` をハンドラ内で生成（SnapStart一意性順守）。
 - 暗号化: バケット既定のSSE-S3（AES256）。アプリ側のヘッダ指定は不要。
 - Content-Type: `image/png` または `image/jpeg`。
+- ライフサイクル: Terraform管理のS3バケットに対して、作成から10日経過したオブジェクトを自動削除するライフサイクルルールを適用する。APIで生成された成果物はこの期間内に取得する運用を前提とする（TTL超過後の再取得は再生成で対応）。
 
 ### 7. セキュリティ/CORS/SSRF対策
 - CORS:

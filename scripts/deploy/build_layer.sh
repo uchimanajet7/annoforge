@@ -22,7 +22,7 @@ __af_end() {
 trap __af_end EXIT
 
 # 既定値（安定・再現性重視）
-DEFAULT_PILLOW_VERSION="11.3.0"
+DEFAULT_PILLOW_VERSION="12.0.0"
 DEFAULT_ARCH="arm64"   # arm64 | x86_64
 
 ARCH="$DEFAULT_ARCH"
@@ -47,7 +47,7 @@ done
 resolve_latest() {
   # PyPIからJSONを取得して info.version を抜き出す（失敗時は空文字）
   set +e
-  LATEST=$(curl -fsSL https://pypi.org/pypi/Pillow/json | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])' 2>/dev/null)
+LATEST=$(curl -fsSL https://pypi.org/pypi/Pillow/json | jq -r '.info.version' 2>/dev/null)
   CODE=$?
   set -e
   if [[ $CODE -ne 0 || -z "$LATEST" ]]; then

@@ -154,3 +154,19 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "output" {
     }
   }
 }
+
+# オブジェクトを作成から10日後に自動削除するライフサイクルルール
+resource "aws_s3_bucket_lifecycle_configuration" "output" {
+  bucket = aws_s3_bucket.output.id
+
+  rule {
+    id     = "expire-objects-after-10-days"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 10
+    }
+  }
+}

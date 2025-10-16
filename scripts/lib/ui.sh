@@ -68,7 +68,7 @@ ui::debug() { # $1=tag $2=message
   fi
 }
 
-# 時刻スタンプ（ミリ秒）: 可能なら GNU date/gdate、次に Python3、最後に秒精度へフォールバック
+# 時刻スタンプ（ミリ秒）: gdate/GNU date があればミリ秒、なければ ns サポート判定、最後に秒精度へフォールバック
 ui::ts() {
   if command -v gdate >/dev/null 2>&1; then
     gdate '+%Y/%m/%d %H:%M:%S.%3N (%Z)'
@@ -78,13 +78,11 @@ ui::ts() {
     date '+%Y/%m/%d %H:%M:%S.%3N (%Z)'
     return
   fi
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - <<'PY'
-import datetime
-now = datetime.datetime.now().astimezone()
-ts = now.strftime('%Y/%m/%d %H:%M:%S.') + f"{int(now.microsecond/1000):03d} (" + (now.tzname() or 'UTC') + ")"
-print(ts)
-PY
+  local ns
+  ns=$(date '+%N' 2>/dev/null || true)
+  if [[ "$ns" =~ ^[0-9]+$ && ${#ns} -ge 3 ]]; then
+    local ms=${ns:0:3}
+    printf '%s.%03d (%s)\n' "$(date '+%Y/%m/%d %H:%M:%S')" "$ms" "$(date '+%Z')"
     return
   fi
   date '+%Y/%m/%d %H:%M:%S (%Z)'
@@ -98,14 +96,14 @@ ui::epoch_ms() {
   if date --version >/dev/null 2>&1; then
     date +%s%3N 2>/dev/null && return
   fi
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - <<'PY'
-import time
-print(int(time.time()*1000))
-PY
+  local ns
+  ns=$(date '+%N' 2>/dev/null || true)
+  if [[ "$ns" =~ ^[0-9]+$ && ${#ns} -ge 3 ]]; then
+    local sec
+    sec=$(date '+%s' 2>/dev/null)
+    printf '%s' $(( sec*1000 + 10#${ns:0:3} ))
     return
   fi
-  # 秒精度しか無い場合は *1000 で代替
   printf '%s' $(( $(date +%s 2>/dev/null) * 1000 ))
 }
 

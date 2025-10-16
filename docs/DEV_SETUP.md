@@ -54,6 +54,9 @@ shellcheck --version
 terraform -version
 aws --version   # 任意
 ```
+```
+bash scripts/tools/check_updates.sh   # 最新差分を確認
+```
 
 ### zsh をお使いの方へ
 - 本リポのツールは bash 前提です。zsh が既定の環境でも、実行時は `bash` を明示して実行してください。
