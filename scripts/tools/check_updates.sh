@@ -16,7 +16,7 @@ targets+=(
 )
 
 targets+=(
-  "konva|npm|konva|web/index.html|konva@([0-9.]+)|web/index.html の CDN バージョンを {latest} に更新|docs/VERSIONS.md#konva|https://www.jsdelivr.com/package/npm/konva|"
+  "konva|unpkg_package_json|konva|web/index.html|konva@([0-9.]+)|web/index.html の CDN バージョンを {latest} に更新|docs/VERSIONS.md#konva|https://www.jsdelivr.com/package/npm/konva|"
 )
 
 targets+=(
@@ -57,10 +57,6 @@ targets+=(
 
 targets+=(
   "jq|html_regex|https://jqlang.github.io/jq/|CMD:jq --version|jq-([0-9.]+)|docs/VERSIONS.md#開発環境ツール を参照|docs/VERSIONS.md#開発環境ツール|https://jqlang.github.io/jq/|Download jq [0-9]+\\.[0-9]+(?:\\.[0-9]+)?"
-)
-
-targets+=(
-  "node|node_index|https://nodejs.org/dist/index.json|CMD:node --version|v([0-9.]+)|docs/VERSIONS.md#開発環境ツール を参照|docs/VERSIONS.md#開発環境ツール|https://nodejs.org/en/download/current/|"
 )
 
 want_json="false"
@@ -163,12 +159,27 @@ fetch_latest_version() {
       LATEST_VERSION="$(printf '%s' "$data" | jq -r '.info.version')" || return 1
       return 0
       ;;
-    npm)
-      FETCH_ENDPOINT="https://registry.npmjs.org/${target}/latest"
-      if ! data=$(http_get "$FETCH_ENDPOINT"); then
-        return 1
+    unpkg_package_json)
+      FETCH_ENDPOINT="https://unpkg.com/${target}@latest/package.json"
+      if ! data=$(http_get "$FETCH_ENDPOINT" "application/json"); then
+        local __unpkg_err="${HTTP_ERROR_TEXT:-}"
+        FETCH_ENDPOINT="https://data.jsdelivr.com/v1/packages/npm/${target}/resolved"
+        if ! data=$(http_get "$FETCH_ENDPOINT" "application/json"); then
+          return 1
+        fi
+        LATEST_VERSION="$(printf '%s' "$data" | jq -r '.version')" || return 1
+        if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
+          FETCH_NOTE="failed to parse jsDelivr resolved"
+          return 1
+        fi
+        FETCH_NOTE="unpkg から最新版を取得できなかったため、jsDelivr Data API にフォールバックしました: ${__unpkg_err:-unpkg fetch failed}"
+        return 0
       fi
       LATEST_VERSION="$(printf '%s' "$data" | jq -r '.version')" || return 1
+      if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
+        FETCH_NOTE="failed to parse unpkg package.json"
+        return 1
+      fi
       return 0
       ;;
     hashicorp_release)
@@ -221,23 +232,6 @@ fetch_latest_version() {
       LATEST_VERSION="$(printf '%s' "$data" | jq -r '.versions | map(.version) | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort_by(split(".") | map(tonumber)) | last')" || return 1
       if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
         FETCH_NOTE="failed to parse aws cli manifest"
-        return 1
-      fi
-      return 0
-      ;;
-    node_index)
-      FETCH_ENDPOINT="$target"
-      if ! data=$(http_get "$FETCH_ENDPOINT"); then
-        return 1
-      fi
-      LATEST_VERSION="$(printf '%s' "$data" | jq -r '
-        map(select(.version | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) |
-        sort_by(.version | sub("^v";"") | split(".") | map(tonumber)) |
-        last |
-        .version
-      ' 2>/dev/null)" || return 1
-      if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
-        FETCH_NOTE="failed to parse node index"
         return 1
       fi
       return 0

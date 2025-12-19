@@ -49,7 +49,7 @@
   - `[info-only]`: 自動取得対象外。リンク先を手動確認。
 
 ### 対象と参照リンク
-- スクリプトは `scripts/tools/check_updates.sh` 冒頭の `targets` 定義に基づいて監視対象を判定。最新版の取得には PyPI / npm / HashiCorp Releases / AWS CLI Command Reference (`https://awscli.amazonaws.com/v2/documentation/api/latest/index.html`) / python.org / nodejs.org / curl.se / jq 公式サイトなどの一次情報を利用している。
+- スクリプトは `scripts/tools/check_updates.sh` 冒頭の `targets` 定義に基づいて監視対象を判定。最新版の取得には PyPI / HashiCorp Releases / AWS CLI Command Reference (`https://awscli.amazonaws.com/v2/documentation/api/latest/index.html`) / python.org / unpkg（CDN: package.json）/ jsDelivr Data API / curl.se / jqlang.github.io/jq 公式サイトなどの公開情報を利用している。
 - 各ターゲットは以下のドキュメント節に対応する。
   - Pillow → `#pillow`
   - Konva → `#konva`
@@ -57,7 +57,7 @@
   - Terraform AWS Provider → `#terraform-aws-provider`
   - Terraform Archive Provider → `#terraform-archive-provider`
   - AWS Lambda Python runtime → `#aws-lambda-python-runtime`
-  - 開発環境ツール（aws-cli/python3/pip/zip/curl/jq/node） → `#開発環境ツール`
+  - 開発環境ツール（aws-cli/python3/pip/zip/curl/jq） → `#開発環境ツール`
 
 ## Pillow
 - 目的: セキュリティ更新/機能追加の取り込み。
@@ -110,7 +110,6 @@
   - `zip`
   - `curl`
   - `jq`
-  - `node`
 - 更新方針:
   - プライマリ OS が macOS の場合は Homebrew、Linux の場合はパッケージマネージャや公式インストーラを利用。
   - 各コマンドのリリースページ（スクリプト出力の `ref`）から変更点を確認し、必要に応じて更新。
