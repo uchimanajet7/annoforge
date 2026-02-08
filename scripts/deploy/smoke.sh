@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# エンドツーエンドのスモークテスト: /annotate → presignedUrl → HEAD 200
+# エンドツーエンドのスモークテスト: /annotate → presignedUrl → GET 200
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,7 +22,7 @@ trap __af_end EXIT
 # 既定は小さめで安定したCDNを使用（外部取得遅延での誤検知を避ける）
 IMAGE_URL="https://placehold.co/256x256.png"
 SMOKE_TIMEOUT_FUNC="${SMOKE_TIMEOUT_FUNC:-25}"  # POSTの全体最大秒
-SMOKE_TIMEOUT_HEAD="${SMOKE_TIMEOUT_HEAD:-10}"  # HEAD確認の最大秒
+SMOKE_TIMEOUT_HEAD="${SMOKE_TIMEOUT_HEAD:-10}"  # GET確認の最大秒
 # readiness待ち（Function URLの伝播/コールドを吸収）。0で無効。
 SMOKE_READY_WAIT_SECONDS="${SMOKE_READY_WAIT_SECONDS:-90}"
 ALL_SHAPES="false"
@@ -95,7 +95,7 @@ if [[ "$ALL_SHAPES" == "true" ]]; then
   BODY_PAYLOAD="$BODY_ALL"
 fi
 
-# 実行コマンド（POST）: run行ではURLのみを表示。次行にコピー用の1行コマンド（jq付き）。
+# 実行コマンド（POST）。run行の次行に実行コマンド、次行にURLを表示する。
 POST_CMD="curl -sS --connect-timeout 5 --max-time \"${SMOKE_TIMEOUT_FUNC}\" -X POST -H 'Content-Type: application/json' -d '${BODY_PAYLOAD}' \"${BASE_URL}/annotate\" | jq ."
 ui::info smoke "1) POST /annotate で画像を処理し presignedUrl を取得"
 ui::run smoke "POST:"
@@ -109,13 +109,13 @@ echo "${RESP}" | jq . >&2
 PURL=$(echo "${RESP}" | jq -r .presignedUrl 2>/dev/null || true)
 if [[ -z "$PURL" || "$PURL" == "null" ]]; then
   ui::err smoke "presignedUrl を取得できませんでした"
-  ui::info smoke "外部画像の応答遅延やネットワーク要因の可能性があります。--image-url で小さな画像を指定するか、SMOKE_TIMEOUT_FUNC を延長してください。"
+  ui::info smoke "対処: --image-url で小さな画像を指定するか、SMOKE_TIMEOUT_FUNC を延長してください。"
   exit 1
 fi
 
-# HEAD検証（最終応答コードで判定するためリダイレクト追従）
-ui::info smoke "2) presignedUrl の到達性を確認（HEAD, リダイレクト追従, 期待=200）"
-ui::run smoke "HEAD:"
+# GET検証（最終応答コードで判定するためリダイレクト追従）
+ui::info smoke "2) presignedUrl の到達性を確認（GET, リダイレクト追従, 期待=200）"
+ui::run smoke "GET:"
 printf "  %s\n" "curl -sS -L -o /dev/null -w \"%{http_code}\" --connect-timeout 5 --max-time \"${SMOKE_TIMEOUT_HEAD}\" \"${PURL}\"" >&2
 printf "  %s\n" "${PURL}" >&2
 set +e
@@ -125,7 +125,7 @@ if [[ "$CODE" != "200" ]]; then
   ui::err smoke "presignedUrl の到達性検証に失敗 (status=${CODE})"
   exit 1
 fi
-ui::debug smoke "presignedUrl HEAD status: ${CODE}"
+ui::debug smoke "presignedUrl GET status: ${CODE}"
 
 CT=$(echo "${RESP}" | jq -r .metadata.contentType 2>/dev/null || echo "")
 SZ=$(echo "${RESP}" | jq -r .metadata.fileSize 2>/dev/null || echo "")

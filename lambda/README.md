@@ -1,4 +1,10 @@
-# Lambda デプロイ手順（Python 3.13 + SnapStart）
+# Lambda 実装概要: Python 3.13 + SnapStart
+
+## はじめに（推奨導線）
+- 本リポジトリの公式デプロイ導線は **Terraform + デプロイスクリプト** です。新規cloneの方は `docs/DEPLOY.md` を参照してください。
+- 本ファイルは Lambda 実装/設定の把握のための **低レベル参考** です。コンソールでの手動作成・手動変更は IaC と乖離して drift が発生しやすいため、原則として推奨しません。
+
+本書のコマンド例は、原則としてリポジトリルート、つまり `README.md` があるディレクトリでの実行を前提とします。
 
 この関数は画像にアノテーションを描画し、S3に保存してpresigned URLを返します。
 
@@ -9,61 +15,16 @@
 - 依存: Pillow（Lambda Layerとして配布）
 
 ## 環境変数
-- `OUTPUT_BUCKET`（必須）: 出力先S3バケット名
-- `OUTPUT_PREFIX`（任意）: 出力プレフィックス（例 `results/`）
-- `PRESIGN_TTL_DEFAULT_SECONDS`（任意, 既定3600）
-- `PRESIGN_TTL_MAX_SECONDS`（任意, 既定86400, かつ≤604800）
-- `TTL_SAFETY_MARGIN_SECONDS`（任意, 既定300）
-- `RESULT_FORMAT`（任意, `png`|`jpeg`, 既定`png`）
-- `CORS_ALLOW_ORIGINS`（任意, `*` またはカンマ区切り）
-- `IMAGE_URL_ALLOW_REGEX`（任意, 未設定時は `https://` のみ許可）
-- `MAX_IMAGE_BYTES`（任意, 既定10485760=10MiB）
-
-## デプロイ手順（概要）
-1) Pillow Layer の作成（x86_64例）
-
-   コマンド（Amazon Linux 2023互換環境で実行）:
-   ```bash
-   python3 -m venv .venv && source .venv/bin/activate
-   pip install -r lambda/requirements.txt -t python
-   zip -r pillow-layer.zip python
-   ```
-   - コンソールで「レイヤーの作成」→ zipをアップロード
-   - ランタイム「python3.13」を選択
-
-2) Lambda関数の作成
-   - ランタイム: Python 3.13
-   - ハンドラ: `handler.handler`
-   - 上記レイヤーをアタッチ
-   - 実行ロール: S3 Put/Get 権限を付与（`s3:PutObject` と `s3:GetObject`。`s3:PutObjectAcl` は不要）
-
-3) SnapStart 有効化
-   - コンソール: SnapStart → 有効 → 発行後のバージョンに適用
-
-4) Function URL の作成
-   - 認証: NONE
-   - CORS: 必要に応じて有効化（またはコード内ヘッダで対応）
-
-5) 環境変数の設定
-   - `OUTPUT_BUCKET` 等を設定
-
-6) テスト（例）
-   - Function URL: `https://xxxxx.lambda-url..../annotate`
-   - POST JSON:
-   ```bash
-   curl -sS -X POST \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "imageUrl": "https://.../your-image.png",
-       "draw": [
-         {"shape":"line","x1":10,"y1":10,"x2":200,"y2":120,"color":"FF0000","thickness":5},
-         {"shape":"rectangle","x":50,"y":50,"width":150,"height":90,"color":"0000FF","thickness":3}
-       ],
-       "ttlSeconds": 3600,
-       "resultFormat": "png"
-     }' \
-     https://xxxxx.lambda-url..../annotate | jq .
-   ```
+- `OUTPUT_BUCKET`: 出力先S3バケット名。必須。
+- `OUTPUT_PREFIX`: 出力プレフィックス。任意。例: `results/`。
+- `PRESIGN_TTL_DEFAULT_SECONDS`: presigned URL の既定 TTL（秒）。任意。既定は 3600。
+- `PRESIGN_TTL_MAX_SECONDS`: presigned URL の最大 TTL（秒）。任意。既定は 86400。最大は 604800（7日）。
+- `TTL_SAFETY_MARGIN_SECONDS`: 認証情報の残存時間から差し引く安全マージン（秒）。任意。既定は 300。
+- `RESULT_FORMAT`: 出力画像形式。任意。値は `png` または `jpeg`。既定は `png`。
+- `CORS_ALLOW_ORIGINS`: 関数内CORSを有効にした場合の許可オリジン。任意。未設定時は `*`。値は `*` またはカンマ区切り。
+- `INTERNAL_CORS_ENABLED`: 関数内で CORS ヘッダを返すか。任意。既定は false。
+- `IMAGE_URL_ALLOW_REGEX`: 入力画像URLの許可正規表現。任意。未設定時は `https://` のみ許可。
+- `MAX_IMAGE_BYTES`: 入力画像の最大バイト数。任意。既定は 10485760（10MiB）。
 
 ## 備考
 - 実効TTLは `min(要求TTL, 7日, 認証情報の残存-安全マージン)` でクランプされます。

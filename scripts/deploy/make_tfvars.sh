@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/../lib/ui.sh"; ui::init
 ui::debug_fp make_tfvars "$0"
 
@@ -61,12 +62,13 @@ if [[ -z "$BUCKET" ]]; then
   exit 1
 fi
 
-TFVARS_PATH="infra/terraform/dev.auto.tfvars"
+TFVARS_REL="infra/terraform/dev.auto.tfvars"
+TFVARS_PATH="${ROOT_DIR}/${TFVARS_REL}"
 mkdir -p "$(dirname "$TFVARS_PATH")"
 
 if [[ -f "$TFVARS_PATH" && "$YES" != "true" ]]; then
-  ui::info make_tfvars "上書きする前に確認します（既定: N）"
-  ui::ask_yesno OVERWRITE make_tfvars "${TFVARS_PATH} を上書きしますか？" N
+  ui::info make_tfvars "上書きする前に確認します"
+  ui::ask_yesno OVERWRITE make_tfvars "${TFVARS_REL} を上書きしますか？" N
   if [[ "$OVERWRITE" != "true" ]]; then ui::info make_tfvars "中止しました"; exit 1; fi
 fi
 
@@ -89,4 +91,4 @@ pillow_layer_zip_path       = "./build/pillow-layer.zip"
 internal_cors_enabled       = false
 EOF
 
-ui::ok make_tfvars "生成しました: ${TFVARS_PATH}"
+ui::ok make_tfvars "生成しました: ${TFVARS_REL}"

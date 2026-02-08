@@ -211,7 +211,7 @@ def _now_utc() -> datetime:
 def _cred_remaining_seconds() -> Optional[int]:
     """現在の認証情報の残存秒を返す（取得できない場合はNone）。"""
     try:
-        # botocore セッションから expiry_time を参照（存在しない可能性あり）
+        # botocore セッションから expiry_time または _expiry_time を参照する。属性がない場合は None として扱う。
         session = botocore.session.get_session()
         cred = session.get_credentials()
         if cred is None:

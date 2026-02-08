@@ -25,7 +25,7 @@ usage() {
   cat <<USAGE
 使い方: bash scripts/deploy/destroy.sh [--yes]
   - Terraform管理の全リソースを削除します（S3バケット含む）。
-  - 実行前に確認します（既定: N）。--yes 指定時のみ無人で実行します。
+  - 実行前に確認します。--yes 指定時のみ無人で実行します。
 USAGE
 }
 
@@ -40,7 +40,7 @@ done
 ui::hdr destroy "destroy"
 
 if [[ "$YES" != "true" ]]; then
-  ui::info destroy "destroy の前に確認します（既定: N）"
+  ui::info destroy "destroy の前に確認します"
   ui::ask_yesno __GO destroy "destroy を実行しますか？" N
   if [[ "$__GO" != "true" ]]; then
     ui::info destroy "中止しました（何も変更していません）"

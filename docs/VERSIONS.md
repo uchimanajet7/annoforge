@@ -2,33 +2,34 @@
 
 このプロダクトのツール/ライブラリのバージョン方針と、アップグレード手順をまとめます。対象は「開発者が自身のAWSアカウントにデプロイして使う」ユースケースです。
 
-## 方針（要点）
-- 互換性: 後方互換の配慮は不要（開発中前提）。ただし、破壊的変更時は `docs/CHANGELOG.md` に記録することを推奨。
+本書のコマンド例は、原則としてリポジトリルート、つまり `README.md` があるディレクトリでの実行を前提とします。
+
+## 方針の要点
+- 互換性: 後方互換は保証しません。
 - 安定性: Lambdaランタイムは Python 3.13 を既定。SnapStart対応を最優先。
-- アーキテクチャ: 既定は `arm64`（Graviton）。`x86_64` も選択可。レイヤー/ランタイムと揃えること。
+- アーキテクチャ: 既定は `arm64`。Gravitonです。`x86_64` も選択可。レイヤー/ランタイムと揃えること。
 - ピン留め: 重要コンポーネントは明示ピン留め。
-  - Pillow: `lambda/requirements.txt` で厳密ピン（例: `Pillow==11.3.0`）。
-  - Konva: CDNでバージョン指定（例: `10.0.0`）。
-  - Terraform Provider: `~>` のレンジ運用（例: `aws ~> 6.0`）。
-  - Terraform本体: `>= 1.5.0` を前提（1.6+推奨）。
+  - Pillow: `lambda/requirements.txt` で厳密ピンします。`Pillow==12.1.0` のように指定します。
+  - Konva: CDNでバージョン指定します。`10.2.0` のように指定します。
+  - Terraform Provider: `~>` のレンジで運用します。`aws ~> 6.0` のように指定します。
+  - Terraform本体: `>= 1.5.0` を前提とします。1.6+ を推奨します。
 
 ## 現在の固定/推奨バージョン（最新化後）
 - Lambda ランタイム: Python 3.13
-- アーキテクチャ: arm64（Graviton）
-- Pillow: 11.3.0（レイヤーに封入）
-- Konva: 10.0.0（`web/index.html`のCDN）
-- Terraform: 1.5+（1.6+推奨）
+- アーキテクチャ: arm64。Gravitonです。
+- Pillow: 12.1.0。レイヤーに封入しています。
+- Konva: 10.2.0。`web/index.html` のCDN設定です。
+- Terraform: 1.5+。1.6+ を推奨します。
 - Terraform AWS Provider: `~> 6.0`
 - Terraform Archive Provider: `~> 2.4`
-- AWS CLI: v2（最新推奨）
+- AWS CLI: v2。最新を推奨します。
 
-## アップグレードの基本手順（共通）
-1) 変更対象を決める（例: Pillow/Konva/Provider/ランタイム など）。
+## 共通のアップグレード基本手順
+1) 変更対象を決める。たとえば Pillow/Konva/Provider/ランタイム など。
 2) 変更前に `scripts/tools/check_versions.sh` でローカルのツールバージョンを確認。
-3) 対象のアップグレード手順（以下）に従い、ファイルとスクリプトを更新。
+3) 対象のアップグレード手順に従い、ファイルとスクリプトを更新します。
 4) `terraform plan` で差分確認 → `terraform apply`。
-5) 動作確認（`docs/DEPLOY.md` の検証コマンド）。
-6) 破壊的変更なら `docs/CHANGELOG.md` を更新（任意運用）。
+5) 動作確認します。`docs/DEPLOY.md` の検証コマンドを実行します。
 
 ## バージョン監視と更新フロー
 
@@ -44,8 +45,8 @@
 - 主な出力セクション:
   - `[needs-update]`: 最新との差分あり。`action` と `doc` に従って更新。
   - `[up-to-date]`: 現行が最新版。
-  - `[missing]`: 現行値が取得できない（ファイル未生成など）。
-  - `[unknown]`: 最新版の取得に失敗（ネットワーク等）。
+  - `[missing]`: 現行値が取得できません。ファイル未生成などが原因です。
+  - `[unknown]`: 最新版の取得に失敗しました。ネットワーク等が原因です。
   - `[info-only]`: 自動取得対象外。リンク先を手動確認。
 
 ### 対象と参照リンク
@@ -57,17 +58,18 @@
   - Terraform AWS Provider → `#terraform-aws-provider`
   - Terraform Archive Provider → `#terraform-archive-provider`
   - AWS Lambda Python runtime → `#aws-lambda-python-runtime`
-  - 開発環境ツール（aws-cli/python3/pip/zip/curl/jq） → `#開発環境ツール`
+  - 開発環境ツール: aws-cli/python3/pip/zip/curl/jq → `#開発環境ツール`
 
 ## Pillow
 - 目的: セキュリティ更新/機能追加の取り込み。
 - アップグレード手順:
-  1) 目標バージョンを決定（例: `12.0.0`）。PyPIリリースノートを参照。
-  2) `scripts/deploy/build_layer.sh --version <新バージョン|latest>` を実行し、`infra/terraform/build/pillow-layer.zip` を再生成（Python 3.13 / cp313 / manylinux2014_* を前提）。
+  1) 目標バージョンを決定します。`12.1.0` のように指定します。PyPIリリースノートを参照してください。
+  2) `scripts/deploy/build_layer.sh --version <新バージョン|latest>` を実行し、`infra/terraform/build/pillow-layer.zip` を再生成します。前提は Python 3.13 / cp313 / manylinux2014_* です。
   3) `infra/terraform/dev.auto.tfvars` の `pillow_layer_zip_path` が `./build/pillow-layer.zip` になっていることを確認。
+     - `infra/terraform/dev.auto.tfvars` が未作成の場合は、`scripts/deploy/make_tfvars.sh` で生成するか、`docs/DEPLOY.md` の tfvars 例を参考に手動作成してください。
   4) `terraform apply` を実行。
 - 検証: APIにサンプルJSONをPOSTし、生成画像が期待通りであること。
-- 注意: ランタイム/アーキとwheelの互換（manylinux2014, aarch64/arm64, cp313）を満たすこと。
+- 注意: ランタイム/アーキとwheelの互換は manylinux2014, aarch64/arm64, cp313 を満たすこと。
 
 ## Konva
 - CDNスクリプトのバージョンを `web/index.html` で指定。
@@ -77,7 +79,7 @@
   3) JSON形式の仕様が変化していないか確認し、変更があれば `docs/SPEC.md` を更新。
 
 ## Terraform CLI
-- 取得方法: `terraform version` でローカルのインストール版を確認。必要に応じて `brew upgrade terraform` などで更新。
+- 取得方法: `terraform version` でローカルのインストール版を確認。必要に応じてアップデートする。
 - 更新時は `terraform -version` の結果を記録し、`terraform plan` が成功することを確認。
 - HashiCorp Release Notes を参照し、破壊的変更が無いか事前確認する。
 

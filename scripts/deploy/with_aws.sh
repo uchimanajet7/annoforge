@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 認証ラッパー: 一時クレデンシャルをプロセス内に注入し、そのまま後続コマンドを実行する
-# - eval不要・ディスク非保存・秘匿値を標準出力に出さない
+# - export 行のみを抽出して eval で適用する。ディスク非保存・秘匿値を標準出力に出さない
 # - mode=auth: AssumeRole + MFA を内蔵ロジックで実行し、export 行のみを取り込む
 # - mode=profile: aws configure export-credentials --format env を内部で実行し、export 行のみを取り込む
 set -euo pipefail
@@ -22,9 +22,9 @@ __af_end() {
 }
 trap __af_end EXIT
 
-MODE="profile"       # profile | auth（既定: profile）
+MODE="profile"       # profile | auth。既定は profile。
 PROFILE=""           # mode=profile 用
-BASE_PROFILE=""      # mode=auth 用（任意）
+BASE_PROFILE=""      # mode=auth 用。任意。
 ROLE_ARN=""          # mode=auth 用
 MFA_ARN=""           # mode=auth 用
 DURATION="3600"       # mode=auth 用
@@ -34,18 +34,18 @@ DURATION="3600"       # mode=auth 用
     使い方: scripts/deploy/with_aws.sh [--mode profile|auth] [オプション] -- <command...>
 
     モード:
-      --mode auth        AssumeRole + MFA で一時クレデンシャルを取得（内蔵）
+      --mode auth        AssumeRole + MFA で一時クレデンシャルを取得する。このスクリプト内蔵のフローです。
         --base-profile NAME
         --role-arn ARN
         --mfa-arn  ARN
         --duration SECONDS
 
-      --mode profile     AWS CLI v2 の credential source を用いる（既定）
-        --profile NAME   export-credentials の対象プロファイル（未指定時は対話選択）
+      --mode profile     AWS CLI v2 の credential source を用いる。既定のモードです。
+        --profile NAME   export-credentials の対象プロファイル。未指定時は対話で選択します。
 
 コマンド:
   -- の後に続くコマンドを、そのまま認証済み環境で exec します。
-  省略時は bash を起動（セッション型）。
+  省略時は bash を起動します。対話的に利用する想定です。
 USAGE
 }
 
@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# 残りは実行コマンド（未指定なら bash）
+# 残りは実行コマンド。未指定時は bash を起動します。
 if [[ $# -gt 0 ]]; then
   CMD=("$@")
 else
@@ -220,7 +220,7 @@ fi
       STATUS=$?
       set -e
       if [[ $STATUS -ne 0 || ${#PROFILES[@]} -eq 0 ]]; then
-        err "プロファイル一覧の取得に失敗しました。AWS CLI v2 と設定(~/.aws/config)をご確認ください。"
+        err "プロファイル一覧の取得に失敗しました。AWS CLI v2 とプロファイル設定（aws configure など）をご確認ください。"
         exit 2
       fi
       # 表示関数
@@ -260,7 +260,7 @@ fi
           err "無効な入力です。番号または一覧にあるプロファイル名を指定してください。"
           continue
         fi
-        ui::info with_aws "選択の適用前に確認します（既定: N）"
+        ui::info with_aws "選択の適用前に確認します"
         ui::ask_yesno __CONFIRM with_aws "選択: $picked で実行しますか？" N
         if [[ "$__CONFIRM" == "true" ]]; then PROFILE="$picked"; break; fi
       done

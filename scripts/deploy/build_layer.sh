@@ -22,7 +22,7 @@ __af_end() {
 trap __af_end EXIT
 
 # 既定値（安定・再現性重視）
-DEFAULT_PILLOW_VERSION="12.0.0"
+DEFAULT_PILLOW_VERSION="12.1.0"
 DEFAULT_ARCH="arm64"   # arm64 | x86_64
 
 ARCH="$DEFAULT_ARCH"
@@ -79,11 +79,19 @@ fi
 ui::hdr layer "Pillow レイヤー作成"
 ui::info layer "Pillow==${VERSION} / ${PLATFORM} でレイヤーを作成します"
 
-# WORKDIR は未使用のため保持しません（SC2034回避）
+# 実行ディレクトリに依存しないよう、作業は build/ 配下の一時ディレクトリで行う
+OUTPUT_PATH_REL="infra/terraform/build/pillow-layer.zip"
 OUTPUT_DIR="${ROOT_DIR}/infra/terraform/build"
-OUTPUT_PATH="${OUTPUT_DIR}/pillow-layer.zip"
+OUTPUT_PATH="${ROOT_DIR}/${OUTPUT_PATH_REL}"
+WORK_DIR_REL="infra/terraform/build/.tmp-layer-build"
+WORK_DIR="${ROOT_DIR}/${WORK_DIR_REL}"
+
 mkdir -p "${OUTPUT_DIR}"
-rm -rf python "${OUTPUT_PATH}" .venv-build-layer >/dev/null 2>&1 || true
+rm -f "${OUTPUT_PATH}" >/dev/null 2>&1 || true
+rm -rf "${WORK_DIR}" >/dev/null 2>&1 || true
+mkdir -p "${WORK_DIR}"
+cd "${WORK_DIR}"
+
 python3 -m venv .venv-build-layer
 source .venv-build-layer/bin/activate
 python -m pip install --upgrade pip >/dev/null
@@ -100,5 +108,7 @@ pip install \
 zip -rq "${OUTPUT_PATH}" python
 deactivate
 rm -rf .venv-build-layer python >/dev/null 2>&1 || true
+cd "${ROOT_DIR}"
+rm -rf "${WORK_DIR}" >/dev/null 2>&1 || true
 
-ui::ok layer "完了: ${OUTPUT_PATH}"
+ui::ok layer "完了: ${OUTPUT_PATH_REL}"

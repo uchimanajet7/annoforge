@@ -199,9 +199,3 @@ ui::ask_yesno() { # $1=__varname(bool) $2=tag $3=prompt $4=default(Y/N)
   local ans; if [[ -t 2 || -t 1 || -t 0 ]] && [[ -r /dev/tty ]]; then IFS= read -r ans < /dev/tty; else IFS= read -r ans; fi; ans="${ans:-$defYN}"
   case "$ans" in Y|y|Yes|yes) printf -v "$__var" 'true';; *) printf -v "$__var" 'false';; esac
 }
-
-# 既定ヒントを表示しないYes/Noプロンプト
-# - 表示は常に「<prompt>: 」のみ
-# - 入力が空なら第4引数(Y/N)の既定を採用
-# - 返値は 'true' または 'false'
-# （削除）ui::ask_yesno_silent は方針により廃止（確認用途は ui::ask_yesno を使用）

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Terraform fmt/validate ラッパー（ローカル/CI共通）
+# Terraform fmt/validate ラッパー。ローカル/CI共通。
 # 用途:
 #   - 整形適用:   bash scripts/tools/fmt_terraform.sh --write
 #   - 整形確認:   bash scripts/tools/fmt_terraform.sh --check

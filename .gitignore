@@ -20,10 +20,3 @@ infra/terraform/*.auto.tfvars
 /python
 scripts/deploy/.venv-build-layer
 scripts/deploy/python
-
-# ドラフトやローカルのみは追跡しない
-docs/_drafts_
-docs/_local_
-image/_local_
-/_AI-VIOLATIONS_.md
-_temp_/

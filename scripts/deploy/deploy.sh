@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 用途別スクリプトを順に呼び出すエントリーポイント
 # - 設定入力→レイヤー作成→tfvars→init→plan→apply→スモーク
-# - 認証は with_aws.sh に一元化（このスクリプトは認証を行いません）
+# - 認証は with_aws.sh に一元化します。このスクリプトは認証を行いません。
 # - 失敗時は直前フェーズ名を表示し、個別スクリプトの再実行を促す
 set -euo pipefail
 
@@ -12,7 +12,7 @@ if [[ "${DEPLOY_DEBUG:-}" == "1" ]]; then
   set -x
 fi
 
-# 既定値（詳細は各スクリプト側で対話補完）
+# 既定値。詳細は各スクリプト側で対話補完します。
 REGION=""
 BUCKET=""
 PREFIX=""
@@ -30,7 +30,7 @@ usage() {
   --prefix <S3_PREFIX>
   --arch <arm64|x86_64>
   --pillow-version <ver|latest>
-  --image-url <URL>           # スモーク用画像URL（任意）
+  --image-url <URL>           # スモーク用画像URL。指定は任意です。
   --yes                       # 途中確認を自動承諾
   -h, --help                  # ヘルプ
 USAGE
@@ -55,30 +55,41 @@ hdr() { ui::hdr deploy "$*"; }
 run() { ui::run deploy "$*"; }
 fail() { ui::err deploy "$*"; exit 1; }
 
-# 開始タイムスタンプ（ミリ秒）
+# 開始タイムスタンプ。ミリ秒です。
 START_TS=$(ui::ts)
 START_MS=$(ui::epoch_ms)
 info "----- start: ${START_TS} -----"
 
-# 前提チェック（認証は with_aws.sh 経由が前提）
-if [[ -z "${AWS_PROFILE-}" && ( -z "${AWS_ACCESS_KEY_ID-}" || -z "${AWS_SESSION_TOKEN-}" ) ]]; then
-  hdr "前提エラー: 認証が未注入（with_aws.sh 経由で実行してください）"
+# 前提チェック。認証は with_aws.sh 経由が前提です。
+if [[ -z "${AWS_PROFILE-}" && ( -z "${AWS_ACCESS_KEY_ID-}" || -z "${AWS_SECRET_ACCESS_KEY-}" || -z "${AWS_SESSION_TOKEN-}" ) ]]; then
+  hdr "前提エラー: 認証が未注入です。with_aws.sh 経由で実行してください。"
   ui::err deploy "このエントリーポイントは認証を行いません。プロセス環境に一時クレデンシャルを注入した上で実行してください。"
-  ui::info deploy "実行例（既存プロファイル）:"
+  ui::info deploy "実行例: 既存プロファイル"
   ui::run  deploy "with_aws.sh:"
   printf "  %s\n" "bash scripts/deploy/with_aws.sh --mode profile --profile <WORK_PROFILE> -- bash scripts/deploy/deploy.sh" >&2
-  ui::info deploy "実行例（AssumeRole+MFA）:"
+  ui::info deploy "実行例: AssumeRole+MFA"
   ui::run  deploy "with_aws.sh:"
-  printf "  %s\n" "bash scripts/deploy/with_aws.sh --mode auth --base-profile default --role-arn arn:aws:iam::<ACCOUNT_ID>:role/OrganizationAccountDeveloperRole --mfa-arn arn:aws:iam::<ACCOUNT_ID>:mfa/<DEVICE> --duration 3600 -- bash scripts/deploy/deploy.sh" >&2
+  printf "  %s\n" "bash scripts/deploy/with_aws.sh --mode auth --base-profile <BASE_PROFILE> --role-arn arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME> --mfa-arn arn:aws:iam::<ACCOUNT_ID>:mfa/<DEVICE> --duration 3600 -- bash scripts/deploy/deploy.sh" >&2
   exit 1
 fi
 
 # 1) 設定入力 (setup)
 hdr "設定入力(setup)"
+SETUP_ARGS=()
+[[ -n "$REGION" ]] && SETUP_ARGS+=(--region "$REGION")
+[[ -n "$BUCKET" ]] && SETUP_ARGS+=(--bucket "$BUCKET")
+[[ -n "$PREFIX" ]] && SETUP_ARGS+=(--prefix "$PREFIX")
+[[ -n "$ARCH" ]] && SETUP_ARGS+=(--arch "$ARCH")
+[[ -n "$PILLOW_VERSION" ]] && SETUP_ARGS+=(--pillow-version "$PILLOW_VERSION")
+[[ -n "$IMAGE_URL" ]] && SETUP_ARGS+=(--image-url "$IMAGE_URL")
 ui::run deploy "setup.sh:"
-printf "  %s\n" "bash ${SCRIPT_DIR}/setup.sh" >&2
+if (( ${#SETUP_ARGS[@]} )); then
+  printf "  %s\n" "bash ${SCRIPT_DIR}/setup.sh ${SETUP_ARGS[*]}" >&2
+else
+  printf "  %s\n" "bash ${SCRIPT_DIR}/setup.sh" >&2
+fi
 TMP_SETUP=$(mktemp)
-bash "${SCRIPT_DIR}/setup.sh" | tee "$TMP_SETUP"
+bash "${SCRIPT_DIR}/setup.sh" "${SETUP_ARGS[@]}" | tee "$TMP_SETUP"
 REGION=$(grep -E '^__OUT_REGION=' "$TMP_SETUP" | tail -n1 | cut -d= -f2- || true)
 BUCKET=$(grep -E '^__OUT_BUCKET=' "$TMP_SETUP" | tail -n1 | cut -d= -f2- || true)
 PREFIX=$(grep -E '^__OUT_PREFIX=' "$TMP_SETUP" | tail -n1 | cut -d= -f2- || true)
@@ -140,7 +151,7 @@ STATUS=$?
 ui::debug deploy "after tf_plan.sh status=${STATUS}"
 ui::debug deploy "enter apply section"
 
-# 6) terraform apply（TTY安全・既定Nで確認。YES/自動承認のみ無人化）
+# 6) terraform apply。TTY安全です。既定は N で確認します。YES または自動承認の場合のみ無人化します。
 hdr "Terraform apply"
 TA_ARGS=()
 AUTO_APPLY="false"
@@ -149,10 +160,10 @@ if [[ "${YES}" == "true" || "${APPLY_YES:-false}" == "true" ]]; then
 fi
 
 if [[ "${AUTO_APPLY}" != "true" ]]; then
-  ui::info deploy "plan の内容を apply する前に確認します（既定: N）"
+  ui::info deploy "plan の内容を apply する前に確認します"
   ui::ask_yesno __GO deploy "plan の内容を apply しますか？" N
   if [[ "${__GO}" != "true" ]]; then
-    ui::info deploy "apply をスキップしました（正常終了）。再適用は以下を参照してください。"
+    ui::info deploy "apply をスキップしました。正常終了します。再適用は以下を参照してください。"
     ui::run  deploy "tf_apply.sh:"
     printf "  %s\n" "bash ${SCRIPT_DIR}/tf_apply.sh --yes" >&2
     exit 0
@@ -189,7 +200,7 @@ else
   bash "${SCRIPT_DIR}/smoke.sh"
 fi
 
-# 終了タイムスタンプ（ミリ秒）
+# 終了タイムスタンプ。ミリ秒です。
 END_TS=$(ui::ts)
 END_MS=$(ui::epoch_ms)
 DIFF_MS=$((END_MS-START_MS))

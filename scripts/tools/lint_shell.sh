@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# ShellCheck ラッパー（ローカル/CI共通）
+# ShellCheck ラッパー。ローカル/CI共通。
 # 用途:
 #   - warnings もエラーとして扱う:   bash scripts/tools/lint_shell.sh --strict
-#   - 情報表示のみ（既定）:        bash scripts/tools/lint_shell.sh
+#   - 既定は情報表示のみ:        bash scripts/tools/lint_shell.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# UI 初期化（存在しない環境でも動作するよう best-effort）
+# UI 初期化。ui.sh がある場合は読み込み、無ければ簡易出力に切り替える。
 if [[ -f "${ROOT_DIR}/scripts/lib/ui.sh" ]]; then
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/scripts/lib/ui.sh"; ui::init || true
@@ -47,7 +47,7 @@ if [[ -z "$FILES_LIST" ]]; then
   exit 0
 fi
 
-# Bash 3.2（macOS既定）互換: 配列/mapfileを使わずに引数を構築
+# macOS既定の Bash 3.2 に合わせ、配列/mapfile を使わずに引数を構築する。
 set --
 while IFS= read -r f; do
   set -- "$@" "$f"

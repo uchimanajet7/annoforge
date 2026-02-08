@@ -1,38 +1,40 @@
-# ローカル開発セットアップ（macOS / Apple Silicon）
+# ローカル開発セットアップ
 
-本書は、CI と同じチェック（ShellCheck, Terraform fmt/validate）をローカルで再現し、環境差や部分最適を排除するための最短セットアップを示します（SSOT）。
+本書は、CI と同じチェックである ShellCheck と Terraform の fmt/validate をローカルで再現し、環境差や部分最適を排除するための最短セットアップを示します。
+
+本書のコマンド例は、原則としてリポジトリルートでの実行を前提とします。
 
 ## 対象
-- macOS 13+（arm64）想定。Homebrew 利用。Docker は不要（任意）。
+- 本書は macOS + Homebrew を前提としたローカル開発セットアップです。Docker は必須ではありません。
 
 ## 1) Homebrew の確認
 ```
-brew --version || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew --version
 ```
 
 ## 2) 必須ツールのインストール
-- ShellCheck（Shell/Bash の静的検査）
+- ShellCheck。Shell/Bash の静的検査です。
 ```
 brew install shellcheck
 ```
-- Terraform（フォーマット/検証）
+- Terraform。フォーマットと検証で使います。
 ```
 brew tap hashicorp/tap
 brew install hashicorp/tap/terraform
 ```
-- 任意（デプロイや補助で利用）
+- 任意です。以降の確認例に含むため、必要ならインストールしてください。
 ```
 brew install awscli jq
 ```
 
 ### 必要バージョンの目安
-- ShellCheck: 0.9.0 以上（Homebrew stable 推奨）
-- Terraform: 1.5.x–1.7.x（本リポは 1.5+ を前提）
-- AWS CLI: v2（任意; デプロイで利用）
-- Python: 3.13（任意; Pillow Layer のローカル生成で利用）
-- jq: 1.6（任意; スモーク時のJSON整形で利用）
+- ShellCheck: 0.9.0 以上。Homebrew stable を推奨します。
+- Terraform: 1.5.x–1.7.x。本リポは 1.5+ を前提とします。
+- AWS CLI: v2。任意です。デプロイで使います。
+- Python: 3.13。任意です。Pillow Layer のローカル生成で使います。
+- jq: 1.6。任意です。スモーク時の JSON 整形で使います。
 
-### 一括セットアップ（任意）
+### 任意: 一括セットアップ
 ```
 brew update
 brew tap hashicorp/tap
@@ -40,13 +42,12 @@ brew install shellcheck hashicorp/tap/terraform awscli jq || true
 brew upgrade shellcheck hashicorp/tap/terraform awscli jq || true
 ```
 
-## 2.5) PATH の設定確認（Homebrew / Apple Silicon）
-```
-echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-eval "$(/opt/homebrew/bin/brew shellenv)"
-echo $PATH | sed 's/:/\n/g' | nl | sed -n '1,50p'
-```
-先頭付近に `/opt/homebrew/bin` が含まれていることを確認してください。
+## 2.5) Homebrew の設定。公式手順です。
+Homebrew のインストールとシェル設定は公式手順を参照してください。
+- https://brew.sh/
+
+確認:
+- `brew --version` が実行できること。できない場合は上記の公式手順に従ってシェル設定を完了してください。
 
 ## 3) バージョン確認
 ```
@@ -55,7 +56,7 @@ terraform -version
 aws --version   # 任意
 ```
 ```
-bash scripts/tools/check_updates.sh   # 最新差分を確認
+bash scripts/tools/check_updates.sh   # 任意: 最新差分を確認
 ```
 
 ### zsh をお使いの方へ
@@ -66,37 +67,37 @@ bash scripts/tools/fmt_terraform.sh --check
 ```
 
 ## 4) CI と同じチェックをローカルで実行
-- Shell/Bash（警告もエラー扱い = CI と同条件）
+- Shell/Bash。警告もエラー扱いです。CI と同条件です。
 ```
 bash scripts/tools/lint_shell.sh --strict
 ```
-- Terraform（整形の確認と検証）
+- Terraform。整形の確認と検証です。
 ```
-# 未整形なら diff を表示（CI の fmt -check に一致）
+# 未整形なら diff を表示します。CI の fmt -check と一致します。
 bash scripts/tools/fmt_terraform.sh --check
 
-# init(-backend=false) → validate（CI と一致）
+# init は -backend=false で実行し、その後 validate を実行します。CI と一致します。
 bash scripts/tools/fmt_terraform.sh --validate
 ```
-- 整形の自動適用（必要時のみ）
+- 整形の自動適用。必要時のみ実行します。
 ```
 bash scripts/tools/fmt_terraform.sh --write
 ```
 
-### 一括検証（CI 相当）
+### 一括検証。CI 相当です。
 ```
 bash scripts/tools/lint_shell.sh --strict \
   && bash scripts/tools/fmt_terraform.sh --check \
   && bash scripts/tools/fmt_terraform.sh --validate
 ```
 
-## 5) よくあるつまずき（Troubleshooting）
+## 5) よくあるつまずき
 - 「shellcheck not found」
   - 対処: `brew install shellcheck`。再実行で解消。
-- 「mapfile: command not found」（macOS 標準 Bash 3.2）
+- 「mapfile: command not found」。macOS 標準 Bash 3.2 の場合です。
   - 対処: 本リポのスクリプトは Bash 3.2 互換化済み。`bash scripts/...` で実行。
-- Terraform validate で色が出ない（`-no-color`）
-  - 仕様: CI ログの機械可読性/環境差の排除のため、Terraform は無色を既定にしています。Why は `docs/SPEC.md` の「CI ポリシー（出力/カラー方針）」参照。
+- Terraform validate で色が出ない。`-no-color` のためです。
+  - 仕様: CI ログの機械可読性/環境差の排除のため、Terraform validate は無色です。`-no-color` を既定にしています。
 - init/validate で認証が必要？
   - 本セットアップの validate は `-backend=false` のため AWS 認証不要。デプロイは `docs/GETTING_STARTED.md` を参照。
 
@@ -104,26 +105,25 @@ bash scripts/tools/lint_shell.sh --strict \
   - 対処: ネットワーク/プロキシ設定をご確認ください。必要に応じて `rm -rf infra/terraform/.terraform` の後に `bash scripts/tools/fmt_terraform.sh --validate` を再実行。
 - fmt で差分が出続ける
   - 対処: `--write` で整形適用 → 直後に `--check` が成功することを確認してください。
-- Homebrew のコマンドが見つからない（Apple Silicon）
-  - 対処: 上記「PATH の設定確認」の手順で `/opt/homebrew/bin` を PATH に追加してください。
+- Homebrew のコマンドが見つからない
+  - 対処: Homebrew の公式手順 https://brew.sh/ に従ってセットアップを完了してください。
 
-## 6) 参考（Why / 方針）
-- ローカル/CI 共通スクリプト（SSOT）: `scripts/tools/`
-  - `lint_shell.sh`（ShellCheck）、`fmt_terraform.sh`（fmt/validate）
-- CI はこれらを呼ぶだけ（push 時のみ `terraform fmt` を自動適用 → bot コミット）。
-- 出力/カラー方針（CI は無色、UI 側で色付け）は `docs/SPEC.md` に明記。
-- 方針決定の記録: `docs/_local_/ADR-0001-ci-ssot.md`
+## 6) 参考。理由と方針
+- ローカル/CI 共通スクリプト: `scripts/tools/`
+  - `lint_shell.sh` は ShellCheck、`fmt_terraform.sh` は Terraform の整形と検証です。
+- CI はこれらを呼ぶだけです。push のときだけ `terraform fmt` を自動適用し、bot がコミットします。
+- 出力とカラー方針は `docs/SPEC.md` に明記しています。CI は無色で、UI 側で色付けします。
+- 方針: CI 相当チェックは `docs/SPEC.md` の CI ポリシーに従います。
 
-## 6.5) GitHub Pages（Actions）初回有効化と権限（重要）
-- 症状: `actions/configure-pages@v5` の `with: enablement: true` が 403（Resource not accessible by integration）で失敗する。
-- 原因: 未有効のリポで「Pages サイトの新規作成」を GITHUB_TOKEN で行うと権限不足となるため（管理系API）。
-- 対処（推奨・一度だけ）
+## 6.5) GitHub Pages と GitHub Actions。初回有効化と権限。重要
+- 症状: GitHub Pages のデプロイが失敗する／公開されない。例: 403 Resource not accessible by integration。
+- 原因: 初回の Pages 設定の Source は GitHub Actions です。未設定、または実行コンテキストの権限が不足している。
+- 対処: 推奨です。一度だけ対応してください。
   1) GitHub → Settings → Pages → Build and deployment → Source: 「GitHub Actions」を選択 → Save
   2) 以後は `configure-pages@v5 → upload-pages-artifact@v3 → deploy-pages@v4` でデプロイ可能
-  3) 既に有効化済みなら、`with: enablement: true` は不要（削除推奨）
-- 権限（最小）
+- 権限: 最小
   - ワークフロー/ジョブに `permissions: { contents: read, pages: write, id-token: write }`
-  - pull_request（フォーク）では GITHUB_TOKEN は既定で read-only → デプロイは push: main 等で実行
+  - pull_request はフォークでは GITHUB_TOKEN が既定で read-only のため、デプロイは push: main 等で実行します。
 - 参考
   - Using custom workflows with GitHub Pages: https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
   - REST: Create a GitHub Pages site: https://docs.github.com/en/rest/pages/pages#create-a-github-pages-site
@@ -131,12 +131,12 @@ bash scripts/tools/lint_shell.sh --strict \
 ## 7) 次のステップ
 - デプロイ/スモークは `docs/GETTING_STARTED.md` の手順へ。
 
-## 8) アンインストール/クリーンアップ（任意）
+## 8) 任意: アンインストール/クリーンアップ
 - Homebrew パッケージ削除
 ```
 brew uninstall shellcheck terraform awscli jq
 ```
-- Terraform の作業ディレクトリ（ローカル検証の残骸）をクリーン
+- Terraform の作業ディレクトリをクリーンします。
 ```
 rm -rf infra/terraform/.terraform
 ```

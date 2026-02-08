@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Terraformの outputs を一覧表示するヘルパー（表示専用）
+# Terraformの outputs を一覧表示するヘルパー。表示のみを行います。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,8 +23,8 @@ trap __af_end EXIT
 usage() {
   cat <<USAGE
 使い方: bash scripts/deploy/tf_outputs.sh
-  - Terraformの outputs をまとめて表示します（function_url/function_arn/alias_arn/layer_arn）。
-  - 呼び出し例の実行は 'bash scripts/deploy/smoke.sh' の出力(run行)をご参照ください（本スクリプトは表示専用）。
+  - Terraformの outputs をまとめて表示します。function_url/function_arn/alias_arn/layer_arn を表示します。
+  - 呼び出し例の実行は 'bash scripts/deploy/smoke.sh' の出力(run行)をご参照ください。本スクリプトは表示のみを行います。
 USAGE
 }
 
@@ -61,7 +61,7 @@ if [[ ${A_RC} -ne 0 || -z "${A_ARN:-}" || "${A_ARN}" != arn:* ]]; then missing=1
 if [[ ${L_RC} -ne 0 || -z "${L_ARN:-}" || "${L_ARN}" != arn:* ]]; then missing=1; fi
 
 if [[ ${missing} -ne 0 ]]; then
-  ui::err tfout "Terraform outputs が取得できません（未定義/空/形式不正）。'terraform apply' 済みか確認してください。"
+  ui::err tfout "Terraform outputs が取得できません。未定義/空/形式不正のいずれかです。'terraform apply' 済みか確認してください。"
   ui::info tfout "手順: cd infra/terraform && terraform init && terraform plan -out=tfplan && terraform apply tfplan"
   exit 2
 fi

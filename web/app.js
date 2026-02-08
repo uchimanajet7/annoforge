@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const imageInput = document.getElementById('imageInput');
   const openFileBtn = document.getElementById('openFileBtn');
   const clearBtn = document.getElementById('clearBtn');
-  // リポジトリ再編により web/ 配下へ移動
   const copyJsonBtn = document.getElementById('copyJsonBtn');
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
@@ -42,11 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hintOverride) return hintOverride;
     switch(t){
       case 'select': return '背景ドラッグでパン / クリックで選択 / 右下でズーム';
-      case 'rectangle': return 'ドラッグで作成 / 離して確定 / Escで取消';
-      case 'line': return 'クリックで始点→次のクリックで終点 / Escで取消';
-      case 'polygon': return 'クリックで頂点追加 / ダブルクリックかEnterで確定 / Escで取消';
-      case 'parallelogram': return 'P1→P2→P3をクリック / 4点目は自動 / Escで取消';
-      case 'circle': return 'クリックで中心→ドラッグで半径→離して確定 / Escで取消';
+      case 'rectangle': return 'ドラッグで作成 / 離して確定';
+      case 'line': return 'クリックで始点→ドラッグで終点→離して確定';
+      case 'polygon': return 'クリックで頂点追加 / ダブルクリックかEnterで確定';
+      case 'parallelogram': return 'P1→P2→P3をクリック / 4点目は自動';
+      case 'circle': return 'クリックで中心→ドラッグで半径→離して確定';
       default: return '';
     }
   }
@@ -105,6 +104,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 形状モデル配列（原寸座標で保持）
   const shapes = []; // { id, type, colorHex, thickness, ...geometry }
+
+  function cancelDraft() {
+    if (!draft) return;
+    hideCoordinates();
+    hideSnap();
+    if (draft.node) {
+      draft.node.destroy();
+      annotationsLayer.draw();
+    }
+    draft = null;
+  }
 
   // 色（ストロークのみ、塗りなし）
   const paletteColors = ['#FF0000','#00CC66','#0066FF','#FF00FF','#00CCCC','#FFCC00','#FF6600','#7F00FF','#0080FF','#FF0080'];
@@ -248,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (draft && draft.type === 'polygon') finalizePolygon();
     });
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') cancelDraft();
+      if (e.key === 'Escape') return;
       if (e.key === 'Enter' && draft && draft.type === 'polygon') finalizePolygon();
     });
 
@@ -352,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const obj = JSON.parse(txt);
       const count = Array.isArray(obj && obj.draw) ? obj.draw.length : 0;
       if (!count) { importSummary.textContent = '形式が不正、または要素がありません'; runImportBtn.disabled = true; return; }
-      importSummary.textContent = `読み込み候補: ${count} 件（実行で既存を置換）`;
+      importSummary.textContent = `読み込み候補: ${count} 件。実行すると既存を置換します。`;
       runImportBtn.disabled = false;
     } catch (e) {
       importSummary.textContent = 'JSONの構文エラーがあります';
@@ -432,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadedImage.onload = () => {
         placeImage();
         clearAll(); // 既存の形状を消去
-        // 表示とツール状態を統一（選択ツール・倍率1・中央寄せ・選択/ドラフト解除）
+        // 表示とツール状態を統一: 選択ツール、ステージ倍率1、画像はfit比率で中央配置、選択/ドラフト解除
         resetView();
         cancelDraft();
         clearSelection();
