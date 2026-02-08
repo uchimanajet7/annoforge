@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pillow レイヤーZIP作成（manylinux wheel利用、Docker不要を優先）
+# Pillow レイヤーZIP作成（manylinux wheel利用）
 # --version latest 指定時は PyPI から最新安定版を取得し、失敗時は既定へフォールバック
 set -euo pipefail
 

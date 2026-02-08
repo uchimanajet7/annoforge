@@ -52,7 +52,7 @@ BUCKET=${BUCKET:-${DEPLOY_BUCKET:-${BUCKET:-}}}
 PREFIX=${PREFIX:-${DEPLOY_PREFIX:-${PREFIX:-}}}
 ARCH=${ARCH:-${DEPLOY_ARCH:-${ARCH:-arm64}}}
 
-# 入力不要: REGION は引数が無ければ既定を自動採用、BUCKET は必須
+# REGION は引数が無ければ既定を自動採用、BUCKET は必須
 if [[ -z "$REGION" ]]; then
   REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
   if [[ -z "$REGION" ]]; then set +e; REGION=$(aws configure get region 2>/dev/null); set -e; fi

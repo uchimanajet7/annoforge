@@ -10,7 +10,7 @@
 - コード: `lambda/handler.py`。Pillow はレイヤー
 - 既定タイムアウト: 30秒。`lambda_timeout_seconds` 変数で調整できます
 
-## 1) PillowレイヤーZIPの用意: Docker不要を優先
+## 1) PillowレイヤーZIPの用意
 - 既定アーキテクチャは arm64。Graviton です。manylinux2014_aarch64 の wheel で作成:
 
 ```bash

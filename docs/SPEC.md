@@ -71,7 +71,7 @@
 
 ### 4.1 共通フィールド
 - `shape`: `"rectangle" | "line" | "polygon" | "parallelogram" | "circle"`
-- `color`: 6桁HEX。先頭の `#` はあってもなくてもよい。
+- `color`: 6桁HEX。先頭の `#` は任意。
 - `thickness`: number。単位は px。
 
 ### 4.2 形状別フィールド
@@ -95,7 +95,7 @@
 ```
 
 ### 4.4 JSONインポート: モーダル
-- 入力: トップレベル `draw` 配列は必須。`color` は先頭に `#` があってもなくても許容。
+- 入力: トップレベル `draw` 配列は必須。`color` の先頭 `#` は任意。
 - 導線: 「JSON形式」セクション右アクションの「インポート」からモーダル起動。
 - 操作:
   - 貼り付け: モーダル内の「貼り付け」アイコンでクリップボードから取得。非対応時は手動貼り付け。
@@ -209,7 +209,7 @@
 - 例: `{ "imageUrl": "...", "config": { "draw": [ ... ] }, "ttlSeconds": 3600 }`
 
 #### 2.1 サポート形状（初期・WebUI準拠）
-- 共通: `color` は `RRGGBB` で、先頭の `#` はあってもなくてもよい。`thickness` は正の整数（px）。
+- 共通: `color` は `RRGGBB`、先頭の `#` は任意。`thickness` は正の整数（px）。
 - `line`: `x1,y1,x2,y2,color,thickness`
 - `rectangle`: `x,y,width,height,color,thickness`（枠線のみ、塗り無し）
 - `circle`: `x,y,radius,color,thickness`（中心座標）
@@ -260,7 +260,7 @@
 - キー形式（推測困難・一意）:
   - `"{prefix}{yyyy}/{mm}/{dd}/{uuid}_{token}.{ext}"`
   - `uuid = uuid4()`、`token = secrets.token_urlsafe(16)` をハンドラ内で生成（SnapStart一意性順守）。
-- 暗号化: バケット既定のSSE-S3（AES256）。アプリ側のヘッダ指定は不要。
+- 暗号化: バケット既定のSSE-S3（AES256）。アプリ側のヘッダ指定は行わない。
 - Content-Type: `image/png` または `image/jpeg`。
 - ライフサイクル: Terraform管理のS3バケットに対して、作成から10日経過したオブジェクトを自動削除するライフサイクルルールを適用する。APIで生成された成果物はこの期間内に取得する運用を前提とする（TTL超過後の再取得は再生成で対応）。
 
@@ -313,7 +313,7 @@
 
 
 ### CI ポリシー（整形と静的検査）
-- 目的: 人手のローカル整形を不要にし、main/PR を常時グリーンに保つ。
+- 目的: 人手のローカル整形を省き、main/PR を常時グリーンに保つ。
 - 発火条件: push / pull_request / workflow_dispatch。
   - push: `infra/terraform` で `terraform fmt -recursive` を自動適用し、差分があれば bot 署名で自動コミット（当該ジョブのみ `permissions.contents: write`）。
   - PR: 自動整形は行わず、`terraform fmt -check -recursive -diff` の結果だけを出力。
@@ -366,7 +366,7 @@
   - 既定例（tfvars）: `pillow_layer_zip_path = "./build/pillow-layer.zip"`
   - 既存レイヤを使う場合は `existing_layer_arn` を優先し、`pillow_layer_zip_path` は空でもよい。
 - クリーニング
-  - 生成物は `infra/terraform/build/` 配下に集約。不要時は同ディレクトリを削除すればよい。
+- 生成物は `infra/terraform/build/` 配下に集約。削除する場合は、同ディレクトリを削除する。
 
 ---
 
@@ -475,7 +475,7 @@
   - SnapStartとの互換性に問題なし（制限事項に非該当）。
 - 代替案: 関数zip同梱も可（小規模なら選択可）。ただし再デプロイのたびにフル配布となる。
 
-#### 6.1 推奨ビルド手順。Docker不要。arm64既定
+#### 6.1 推奨ビルド手順（arm64既定）
 前提: 以下のコマンド例はリポジトリルートで実行します。
 ```bash
 python3 -m venv .venv && source .venv/bin/activate

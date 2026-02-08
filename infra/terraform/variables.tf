@@ -21,7 +21,7 @@ variable "output_bucket" {
 }
 
 variable "output_prefix" {
-  description = "出力プレフィックス。任意です。末尾スラッシュは不要です。"
+  description = "出力プレフィックス。任意です。末尾スラッシュは付けない。"
   type        = string
   default     = ""
 }

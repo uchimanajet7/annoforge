@@ -99,7 +99,7 @@ bash scripts/tools/lint_shell.sh --strict \
 - Terraform validate で色が出ない。`-no-color` のためです。
   - 仕様: CI ログの機械可読性/環境差の排除のため、Terraform validate は無色です。`-no-color` を既定にしています。
 - init/validate で認証が必要？
-  - 本セットアップの validate は `-backend=false` のため AWS 認証不要。デプロイは `docs/GETTING_STARTED.md` を参照。
+- 本セットアップの validate は `-backend=false` のため AWS 認証は行わない。デプロイは `docs/GETTING_STARTED.md` を参照。
 
 - Terraform が provider/plugin を取得できない
   - 対処: ネットワーク/プロキシ設定をご確認ください。必要に応じて `rm -rf infra/terraform/.terraform` の後に `bash scripts/tools/fmt_terraform.sh --validate` を再実行。

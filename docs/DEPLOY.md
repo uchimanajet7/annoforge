@@ -140,7 +140,7 @@ bash scripts/deploy/smoke.sh --all-shapes
 ```
 
 ## 4. 手動手順。低レベル操作の参考
-4-1) レイヤー作成。Docker不要。arm64
+4-1) レイヤー作成（arm64）
 ```
 python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip
@@ -217,7 +217,7 @@ bash scripts/deploy/with_aws.sh -- bash scripts/deploy/destroy.sh
 ## 8. SSE と presigned URL
 - 本プロジェクトのS3は既定SSEであるSSE-S3/AES256を有効化します。
 - 暗号化オブジェクトでも、presigned URL のGETで問題なくダウンロードできます。S3がサーバ側で復号します。
-- 必要権限は「署名者の `s3:GetObject`」。クライアントは認証不要です。
+- 必要権限は「署名者の `s3:GetObject`」。クライアントは認証しない。
  - 参考: Presigned URLの仕組み。AWS公式
     - https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html
 ## 9. 表示・色について

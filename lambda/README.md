@@ -30,4 +30,4 @@
 - 実効TTLは `min(要求TTL, 7日, 認証情報の残存-安全マージン)` でクランプされます。
 - SnapStart では一意値（uuid/token）はハンドラ内で生成しています。
 - `polygon/parallelogram` は線分連結で輪郭を描画し、幅の互換性問題を回避しています。
-- S3バケット側で既定SSE（SSE-S3/AES256）を有効化しているため、Put時の暗号化指定は不要です。presigned URL によるGETもそのまま利用できます。
+- S3バケット側で既定SSE（SSE-S3/AES256）を有効化しているため、Put時の暗号化指定は行いません。presigned URL によるGETはそのまま利用できます。
