@@ -112,21 +112,27 @@ bash scripts/tools/lint_shell.sh --strict \
 - ローカル/CI 共通スクリプト: `scripts/tools/`
   - `lint_shell.sh` は ShellCheck、`fmt_terraform.sh` は Terraform の整形と検証です。
 - CI はこれらを呼ぶだけです。push のときだけ `terraform fmt` を自動適用し、bot がコミットします。
+- Terraform は GitHub Actions では `hashicorp/setup-terraform@v4` を使用して固定版を導入します。
 - 出力とカラー方針は `docs/SPEC.md` に明記しています。CI は無色で、UI 側で色付けします。
 - 方針: CI 相当チェックは `docs/SPEC.md` の CI ポリシーに従います。
+- GitHub Actions の action 更新確認は `.github/dependabot.yml` の weekly 設定で行います。
 
-## 6.5) GitHub Pages と GitHub Actions。初回有効化と権限。重要
-- 症状: GitHub Pages のデプロイが失敗する／公開されない。例: 403 Resource not accessible by integration。
-- 原因: 初回の Pages 設定の Source は GitHub Actions です。未設定、または実行コンテキストの権限が不足している。
-- 対処: 推奨です。一度だけ対応してください。
-  1) GitHub → Settings → Pages → Build and deployment → Source: 「GitHub Actions」を選択 → Save
-  2) 以後は `configure-pages@v5 → upload-pages-artifact@v3 → deploy-pages@v4` でデプロイ可能
-- 権限: 最小
-  - ワークフロー/ジョブに `permissions: { contents: read, pages: write, id-token: write }`
-  - pull_request はフォークでは GITHUB_TOKEN が既定で read-only のため、デプロイは push: main 等で実行します。
-- 参考
-  - Using custom workflows with GitHub Pages: https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
-  - REST: Create a GitHub Pages site: https://docs.github.com/en/rest/pages/pages#create-a-github-pages-site
+## 6.5) GitHub Pages。初回有効化と権限。重要
+- 本リポジトリの GitHub Pages は GitHub 公式の custom workflow で公開します。
+- 初回のみ、GitHub で以下を設定してください。
+  1) GitHub → Settings → Pages → Build and deployment → Source: 「GitHub Actions」を選択
+  2) Save
+- 権限: `pages.yml` は `permissions: { contents: read, pages: write, id-token: write }` を使用します。
+- 実装方針:
+  - GitHub 公式の custom workflow を使用します。
+  - `actions/configure-pages@v5`、`actions/upload-pages-artifact@v4`、`actions/deploy-pages@v4` で公開します。
+  - publish 用の追加 secret は不要です。
+- pull_request では公開しません。`push: main` または `workflow_dispatch` で反映します。
+
+## 6.6) Dependabot。GitHub Actions 更新監視
+- `.github/dependabot.yml` で `package-ecosystem: "github-actions"` を weekly 実行します。
+- 対象は `.github/workflows/` 配下の action 参照です。
+- 新しい action version が公開されると、Dependabot が更新 pull request を作成します。
 
 ## 7) 次のステップ
 - デプロイ/スモークは `docs/GETTING_STARTED.md` の手順へ。

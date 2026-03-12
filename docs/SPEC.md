@@ -158,6 +158,15 @@
 - `preconnect` と `dns-prefetch` は Safari 系ブラウザの既知バグにより同一要素へ併記しない（必ず別タグに分ける）。
 - CORS を伴わない `script` 取得のため `crossorigin` 属性は付与しない。
 
+### 9.2 GitHub Actions 運用方針
+- 継続的インテグレーション（CI）の JavaScript アクションは Node.js 24 対応済みのものだけを使用する。
+- ソース取得は `actions/checkout@v6` を使用する。
+- Terraform の導入は `hashicorp/setup-terraform@v4` を使用する。
+- GitHub Pages の公開は GitHub 公式の custom workflow を使用する。
+- Pages workflow は `actions/configure-pages@v5`、`actions/upload-pages-artifact@v4`、`actions/deploy-pages@v4` を使用する。
+- リポジトリ設定の GitHub Pages は `GitHub Actions` を使用する。
+- GitHub Actions の更新確認は Dependabot の `github-actions` ecosystem で weekly 実行する。
+
 ## 10. 受け入れ基準
 - 画像上で矩形/直線/多角形/平行四辺形/円が作成できる。
 - 形状の基本編集ができる。矩形と円は移動と拡大縮小と回転に対応し、直線・多角形・平行四辺形は移動と頂点編集に対応する。

@@ -39,7 +39,7 @@ zip -v | head -n1
 - 手順。UI/設定
   1) GitHub → 対象リポジトリ → Settings → Pages
   2) Build and deployment → Source: 「GitHub Actions」を選択 → Save
-  3) 以後、`actions/configure-pages@v5 → actions/upload-pages-artifact@v3 → actions/deploy-pages@v4` の標準手順で自動公開されます
+  3) 以後、`actions/configure-pages@v5 → actions/upload-pages-artifact@v4 → actions/deploy-pages@v4` の標準手順で自動公開されます
 - Tips。ワークフローの微調整
   - 最小権限の明記: `permissions: { contents: read, pages: write, id-token: write }`。本リポは設定済みです。
   - フォーク由来の pull_request では GITHUB_TOKEN が read-only となるため、Pages へのデプロイは push: main 等の信頼コンテキストで実施してください。
