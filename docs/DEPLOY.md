@@ -118,9 +118,9 @@ bash scripts/deploy/with_aws.sh --mode profile --profile <WORK_PROFILE> -- bash 
 ```
 bash scripts/deploy/with_aws.sh --mode auth --role-arn arn:aws:iam::<ACCOUNT_ID>:role/<ROLE> --mfa-arn arn:aws:iam::<ACCOUNT_ID>:mfa/<DEVICE> -- bash scripts/deploy/setup.sh --base-profile <your-base-profile>
 ```
-- レイヤー作成: 最新安定版
+- レイヤー作成: `lambda/requirements.txt` の固定値
 ```
-bash scripts/deploy/build_layer.sh --arch arm64 --version latest
+bash scripts/deploy/build_layer.sh --arch arm64
 ```
 - tfvars生成: 上書き確認あり
 ```
@@ -151,7 +151,7 @@ pip install \
   --abi cp313 \
   --only-binary=:all: \
   -t python \
-  Pillow==12.1.0
+  Pillow==12.2.0
 mkdir -p infra/terraform/build
 zip -r infra/terraform/build/pillow-layer.zip python
 ```
@@ -203,7 +203,7 @@ bash scripts/deploy/with_aws.sh -- bash scripts/deploy/destroy.sh
 ラッパー経由の場合は、上記要件をラッパー側で満たすため、個別スクリプトやTerraformのエラーを大幅に低減できます。
 
 ### 6.1 `pip install` でwheelが見つからない/ネット不調:
-  - `build_layer.sh --version latest` はPyPI参照に失敗すると既定版にフォールバックします。
+  - `build_layer.sh` の既定は `lambda/requirements.txt` の固定値です。`--version latest` 指定時はPyPI参照に失敗すると固定値にフォールバックします。
   - ネットワーク制限がある場合は後で再実行してください。
 - `terraform apply` でS3権限エラー:
   - バケット名/リージョン/PutObject 権限を確認
@@ -276,6 +276,6 @@ bash scripts/deploy/tf_outputs.sh
 DEPLOY_DEBUG=1 bash scripts/deploy/with_aws.sh --mode profile --profile <WORK_PROFILE> -- bash scripts/deploy/deploy.sh
 ```
 - setup の入力は、前段で既定値を明示し、プロンプト自体には既定値を表示しません。Enterで既定値を採用します。対象: リージョン、アーキテクチャ、Pillowバージョン。
-- Pillow の既定は latest で、オンラインで解決します。ネットワークやPyPI障害で解決できない場合は 12.1.0 を自動採用します。
+- Pillow の既定は `lambda/requirements.txt` の固定値です。`--version latest` 指定時のみオンラインで解決し、ネットワークやPyPI障害で解決できない場合は固定値を自動採用します。
 
 ---

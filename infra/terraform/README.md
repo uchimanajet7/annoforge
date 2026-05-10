@@ -23,7 +23,7 @@ pip install \
   --abi cp313 \
   --only-binary=:all: \
   -t python \
-  Pillow==12.1.0
+  Pillow==12.2.0
 mkdir -p infra/terraform/build
 zip -r infra/terraform/build/pillow-layer.zip python
 ```
@@ -34,7 +34,7 @@ zip -r infra/terraform/build/pillow-layer.zip python
 docker run --rm -v "$PWD":/var/task public.ecr.aws/lambda/python:3.13-arm64 bash -lc '
   set -euo pipefail
   python -m pip install --upgrade pip
-  pip install Pillow==12.1.0 -t python
+  pip install Pillow==12.2.0 -t python
   mkdir -p infra/terraform/build
   zip -r infra/terraform/build/pillow-layer.zip python
 '

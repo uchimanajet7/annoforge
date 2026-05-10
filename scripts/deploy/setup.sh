@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/../lib/ui.sh"; ui::init
 ui::debug_fp setup "$0"
 
@@ -27,6 +28,21 @@ PREFIX=""
 ARCH=""
 PILLOW_VERSION=""
 IMAGE_URL=""
+
+read_pinned_pillow_version() {
+  local requirements_file="${ROOT_DIR}/lambda/requirements.txt"
+  local version=""
+  if [[ -f "$requirements_file" ]]; then
+    version="$(sed -nE 's/^[[:space:]]*Pillow==([0-9.]+)[[:space:]]*$/\1/p' "$requirements_file" | head -n1)"
+  fi
+  printf '%s' "$version"
+}
+
+DEFAULT_PILLOW_VERSION="$(read_pinned_pillow_version)"
+if [[ -z "$DEFAULT_PILLOW_VERSION" ]]; then
+  DEFAULT_PILLOW_VERSION="latest"
+fi
+
 usage() {
   cat <<USAGE
 使い方: bash scripts/deploy/setup.sh [--base-profile NAME] [--region REGION] [--bucket NAME] [--prefix PREFIX] [--arch arm64|x86_64] [--pillow-version VER|latest] [--image-url URL]
@@ -83,8 +99,8 @@ if [[ -z "$ARCH" ]]; then
   ui::ask_silent ARCH setup "アーキテクチャ。arm64 または x86_64。" "arm64"
 fi
 if [[ -z "$PILLOW_VERSION" ]]; then
-  ui::info setup "既定: Pillow=latest。Enterで採用します。"
-  ui::ask_silent PILLOW_VERSION setup "Pillowバージョン。例: 12.1.0 または latest" "latest"
+  ui::info setup "既定: Pillow=${DEFAULT_PILLOW_VERSION}。Enterで採用します。"
+  ui::ask_silent PILLOW_VERSION setup "Pillowバージョン。例: ${DEFAULT_PILLOW_VERSION} または latest" "$DEFAULT_PILLOW_VERSION"
 fi
 ui::info setup "自動承認を有効にする前に確認します"
 ui::ask_yesno APPLY_YES setup "Terraform apply を自動承認しますか？" N

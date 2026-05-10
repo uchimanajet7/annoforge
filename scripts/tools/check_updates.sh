@@ -12,7 +12,7 @@ source "${SCRIPT_DIR}/../lib/ui.sh"; ui::init
 targets=()
 
 targets+=(
-  "pillow|pypi|Pillow|lambda/requirements.txt|Pillow==([0-9.]+)|bash scripts/deploy/build_layer.sh --version {latest}|docs/VERSIONS.md#pillow|https://pypi.org/project/Pillow/|"
+  "pillow|pypi|Pillow|lambda/requirements.txt|Pillow==([0-9.]+)|lambda/requirements.txt の Pillow 参照を {latest} に、bash scripts/deploy/build_layer.sh で再生成|docs/VERSIONS.md#pillow|https://pypi.org/project/Pillow/|"
 )
 
 targets+=(

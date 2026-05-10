@@ -9,7 +9,7 @@
 - 安定性: Lambdaランタイムは Python 3.13 を既定。SnapStart対応を最優先。
 - アーキテクチャ: 既定は `arm64`。Gravitonです。`x86_64` も選択可。レイヤー/ランタイムと揃えること。
 - ピン留め: 重要コンポーネントは明示ピン留め。
-  - Pillow: `lambda/requirements.txt` で厳密ピンします。`Pillow==12.1.0` のように指定します。
+  - Pillow: `lambda/requirements.txt` で厳密ピンします。`Pillow==12.2.0` のように指定します。
   - Konva: CDNでバージョン指定します。`10.2.0` のように指定します。
   - Terraform Provider: `~>` のレンジで運用します。`aws ~> 6.0` のように指定します。
   - Terraform本体: `>= 1.5.0` を前提とします。1.6+ を推奨します。
@@ -17,7 +17,7 @@
 ## 現在の固定/推奨バージョン（最新化後）
 - Lambda ランタイム: Python 3.13
 - アーキテクチャ: arm64。Gravitonです。
-- Pillow: 12.1.0。レイヤーに封入しています。
+- Pillow: 12.2.0。レイヤーに封入しています。
 - Konva: 10.2.0。`web/index.html` のCDN設定です。
 - Terraform: 1.5+。1.6+ を推奨します。
 - Terraform AWS Provider: `~> 6.0`
@@ -33,6 +33,13 @@
 
 ## バージョン監視と更新フロー
 
+### Dependabot
+- `.github/dependabot.yml` は、Dependabot が直接扱える依存更新を監視する。
+  - GitHub Actions: `.github/workflows/*.yml`
+  - pip: `lambda/requirements.txt`
+  - Terraform: `infra/terraform`
+- Dependabot の対象外となる CDN 直書き、AWS Lambda runtime、ローカル開発ツール、レイヤー再生成、関連ドキュメント同期は `scripts/tools/check_updates.sh` と各節の手順で確認する。
+
 ### 監視スクリプト
 - 最新差分の取得:  
   ```bash
@@ -43,7 +50,7 @@
   bash scripts/tools/check_updates.sh --json
   ```
 - 主な出力セクション:
-  - `[needs-update]`: 最新との差分あり。`action` と `doc` に従って更新。
+  - `[needs-update]`: 最新との差分あり。`action` と `doc` に従い、固定値と関連手順を更新。
   - `[up-to-date]`: 現行が最新版。
   - `[missing]`: 現行値が取得できません。ファイル未生成などが原因です。
   - `[unknown]`: 最新版の取得に失敗しました。ネットワーク等が原因です。
@@ -63,11 +70,12 @@
 ## Pillow
 - 目的: セキュリティ更新/機能追加の取り込み。
 - アップグレード手順:
-  1) 目標バージョンを決定します。`12.1.0` のように指定します。PyPIリリースノートを参照してください。
-  2) `scripts/deploy/build_layer.sh --version <新バージョン|latest>` を実行し、`infra/terraform/build/pillow-layer.zip` を再生成します。前提は Python 3.13 / cp313 / manylinux2014_* です。
-  3) `infra/terraform/dev.auto.tfvars` の `pillow_layer_zip_path` が `./build/pillow-layer.zip` になっていることを確認。
+  1) 目標バージョンを決定します。`12.2.0` のように指定します。PyPIリリースノートを参照してください。
+  2) `lambda/requirements.txt` の `Pillow==<バージョン>` を更新します。この固定値を Pillow レイヤーの基準にします。
+  3) `bash scripts/deploy/build_layer.sh --version <新バージョン|latest>` を実行し、`infra/terraform/build/pillow-layer.zip` を再生成します。前提は Python 3.13 / cp313 / manylinux2014_* です。
+  4) `infra/terraform/dev.auto.tfvars` の `pillow_layer_zip_path` が `./build/pillow-layer.zip` になっていることを確認。
      - `infra/terraform/dev.auto.tfvars` が未作成の場合は、`scripts/deploy/make_tfvars.sh` で生成するか、`docs/DEPLOY.md` の tfvars 例を参考に手動作成してください。
-  4) `terraform apply` を実行。
+  5) `terraform apply` を実行。
 - 検証: APIにサンプルJSONをPOSTし、生成画像が期待通りであること。
 - 注意: ランタイム/アーキとwheelの互換は manylinux2014, aarch64/arm64, cp313 を満たすこと。
 

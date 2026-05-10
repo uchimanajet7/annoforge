@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pillow レイヤーZIP作成（manylinux wheel利用）
-# --version latest 指定時は PyPI から最新安定版を取得し、失敗時は既定へフォールバック
+# 既定は lambda/requirements.txt の固定値。--version latest 指定時のみ PyPI を参照します。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,13 +21,19 @@ __af_end() {
 }
 trap __af_end EXIT
 
-# 既定値（安定・再現性重視）
-DEFAULT_PILLOW_VERSION="12.1.0"
 DEFAULT_ARCH="arm64"   # arm64 | x86_64
+REQUIREMENTS_FILE="${ROOT_DIR}/lambda/requirements.txt"
+
+read_pinned_pillow_version() {
+  local version=""
+  if [[ -f "$REQUIREMENTS_FILE" ]]; then
+    version="$(sed -nE 's/^[[:space:]]*Pillow==([0-9.]+)[[:space:]]*$/\1/p' "$REQUIREMENTS_FILE" | head -n1)"
+  fi
+  printf '%s' "$version"
+}
 
 ARCH="$DEFAULT_ARCH"
-# 既定は latest。解決失敗時は DEFAULT_PILLOW_VERSION へフォールバック
-VERSION="latest"
+VERSION=""
 
 usage() {
   cat <<USAGE
@@ -43,6 +49,15 @@ while [[ $# -gt 0 ]]; do
     *) ui::err layer "不明な引数: $1"; usage; exit 1;;
   esac
 done
+
+DEFAULT_PILLOW_VERSION="$(read_pinned_pillow_version)"
+if [[ -z "$VERSION" ]]; then
+  if [[ -z "$DEFAULT_PILLOW_VERSION" ]]; then
+    ui::err layer "Pillow固定値を取得できません: ${REQUIREMENTS_FILE}"
+    exit 1
+  fi
+  VERSION="$DEFAULT_PILLOW_VERSION"
+fi
 
 resolve_latest() {
   # PyPIからJSONを取得して info.version を抜き出す（失敗時は空文字）
@@ -63,7 +78,11 @@ if [[ "$VERSION" == "latest" ]]; then
     VERSION="$LATEST"
     ui::info layer "解決: Pillow==${VERSION}"
   else
-    ui::warn layer "最新版の解決に失敗。既定 ${DEFAULT_PILLOW_VERSION} を使用します。"
+    if [[ -z "$DEFAULT_PILLOW_VERSION" ]]; then
+      ui::err layer "最新版の解決に失敗し、フォールバック用のPillow固定値も取得できません: ${REQUIREMENTS_FILE}"
+      exit 1
+    fi
+    ui::warn layer "最新版の解決に失敗。固定値 ${DEFAULT_PILLOW_VERSION} を使用します。"
     VERSION="$DEFAULT_PILLOW_VERSION"
   fi
 fi

@@ -496,7 +496,7 @@ pip install \
   --abi cp313 \
   --only-binary=:all: \
   -t python \
-  Pillow==12.1.0
+  Pillow==12.2.0
 mkdir -p infra/terraform/build
 zip -r infra/terraform/build/pillow-layer.zip python
 ```
@@ -519,7 +519,7 @@ zip -r infra/terraform/build/pillow-layer.zip python
 docker run --rm -v "$PWD":/var/task public.ecr.aws/lambda/python:3.13-arm64 bash -lc '
   set -euo pipefail
   python -m pip install --upgrade pip
-  pip install Pillow==12.1.0 -t python
+  pip install Pillow==12.2.0 -t python
   mkdir -p infra/terraform/build
   zip -r infra/terraform/build/pillow-layer.zip python
 '
@@ -538,7 +538,7 @@ docker run --rm -v "$PWD":/var/task public.ecr.aws/lambda/python:3.13-arm64 bash
 ## 9. 付録: デプロイスクリプトUI（運用仕様）
 - auth/profile 共通の認証確認の表示項目は「Account / Arn / Region」。profile の場合はプロファイル名も表示する。Region の解決順は `AWS_REGION` → `AWS_DEFAULT_REGION` → `aws configure get region`。profile では `--profile` 指定があれば優先。
 - setup の入力は「前段で既定値を明示」し、プロンプト自体には既定値を表示せず、Enterで既定値を採用する。対象: リージョン、アーキテクチャ、Pillowバージョン。
-- Pillow の既定は latest（オンライン解決）。解決不能時は 12.1.0 にフォールバック。
+- Pillow の既定は `lambda/requirements.txt` の固定値。`--version latest` 指定時のみオンライン解決し、解決不能時は固定値にフォールバック。
 - 認証（auth）は、Terraform(AWS Provider v6) の互換性のため原則として環境変数ベースの一時クレデンシャルを用いる。既に認証済みなら auth はスキップし、未認証の場合にのみ AssumeRole+MFA で一時クレデンシャルを発行する。
 - ラッパー方式（推奨）: 認証は `with_aws.sh` 経由でプロセス内に注入し、そのまま後続コマンドを実行する。ディスク非保存・対話/手動の体験一致。
 - apply は plan 完了後に TTY安全の確認を行い、既定は N とし、y の場合のみ `--yes` 付与で自動適用する。`--yes` または setup の自動承認がある場合は確認を省略して自動適用し、Terraform 標準の確認プロンプトには依存しない。
