@@ -244,16 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindImportModal();
     // ツールボタン
     toolButtons().forEach(btn => {
-      btn.addEventListener('click', () => {
-        toolButtons().forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentTool = btn.getAttribute('data-tool');
-        cancelDraft();
-        applySelectionUI();
-        stage.draggable(false);
-        stage.container().style.cursor = 'default';
-        showHint(toolHint(currentTool));
-      });
+      btn.addEventListener('click', () => setCurrentTool(btn.getAttribute('data-tool')));
     });
     // カラー
     if (colorPicker) {
@@ -501,17 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
     advanceWorkspaceRevision();
     // 表示とツール状態を統一: 選択ツール、ステージ倍率1、画像はfit比率で中央配置、選択/ドラフト解除
     resetView();
-    cancelDraft();
-    clearSelection();
-    currentTool = 'select';
-    try {
-      // ツールボタンのアクティブ表示を選択に戻す
-      toolButtons().forEach(b => b.classList.remove('active'));
-      const selBtn = document.querySelector('.tool-btn[data-tool="select"]');
-      if (selBtn) selBtn.classList.add('active');
-    } catch {}
-    applySelectionUI();
-    stage.draggable(false);
+    setCurrentTool('select', { announce: false });
     updateImageNameUI();
     showNotification(loadedImageName ? `${loadedImageName} を読み込みました` : '画像を読み込みました');
   }
@@ -560,7 +541,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!loadedImage) return;
     placeImage();
     // 既存形状の描画サイズも反映し直す
-    annotationsLayer.getChildren().each((node) => {
+    annotationsLayer.getChildren().forEach((node) => {
       const model = findModelByNode(node);
       if (model) redrawNodeFromModel(model, node);
     });
@@ -584,17 +565,63 @@ document.addEventListener('DOMContentLoaded', () => {
   // 描画色
   function colorForStroke() { return currentColor; }
 
+  // ツール状態を一箇所で切り替える
+  function setCurrentTool(tool, { announce = true } = {}) {
+    const nextButton = document.querySelector(`.tool-btn[data-tool="${tool}"]`);
+    if (!nextButton) return false;
+    toolButtons().forEach(button => button.classList.toggle('active', button === nextButton));
+    currentTool = tool;
+    cancelDraft();
+    applySelectionUI();
+    stage.draggable(false);
+    if (announce) showHint(toolHint(currentTool));
+    return true;
+  }
+
+  // 確定済み形状の操作可否を現在のツールに同期する
+  function syncAnnotationInteractivity() {
+    const canDrag = currentTool === 'select';
+    annotationsLayer.getChildren().forEach((node) => {
+      if (node.getAttr('shapeId') !== undefined) node.draggable(canDrag);
+    });
+  }
+
+  function findAnnotationNodeById(id) {
+    return annotationsLayer.findOne((node) => node.getAttr('shapeId') === id);
+  }
+
+  // 選択用の一時的な前面化を解除して、確定モデル順へ戻す
+  function restoreAnnotationNodeOrder() {
+    shapes.forEach((shape) => {
+      const node = findAnnotationNodeById(shape.id);
+      if (node) node.moveToTop();
+    });
+    if (transformer) transformer.moveToTop();
+  }
+
+  function syncAnnotationListSelection() {
+    annotationList.querySelectorAll('.annotation-item[data-shape-id]').forEach((item) => {
+      const isSelected = Number(item.dataset.shapeId) === selectedShapeId;
+      item.classList.toggle('selected', isSelected);
+      const selectButton = item.querySelector('.annotation-select-btn');
+      if (selectButton) selectButton.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+  }
+
   // 選択解除
   function clearSelection() {
     selectedShapeId = null;
     if (transformer) transformer.nodes([]);
     removeAnchors();
+    restoreAnnotationNodeOrder();
+    syncAnnotationListSelection();
     annotationsLayer.draw();
   }
 
   // 選択UI適用
   function applySelectionUI() {
     if (currentTool !== 'select') clearSelection();
+    syncAnnotationInteractivity();
     // ツールに応じてカーソルを変更
     if (currentTool === 'select') {
       stage.container().style.cursor = 'default';
@@ -614,25 +641,36 @@ document.addEventListener('DOMContentLoaded', () => {
     return { stroke, strokeWidth: thickness, listening: true };
   }
 
+  function registerFinalizedShapeNode(node, model) {
+    node.setAttr('shapeId', model.id);
+    node.draggable(currentTool === 'select');
+    attachCommonNodeHandlers(node);
+  }
+
   // 図形選択
   function onSelectShape(node) {
     const model = findModelByNode(node);
     if (!model) return;
-    selectedShapeId = model.id;
+    if (transformer) transformer.nodes([]);
     removeAnchors();
+    restoreAnnotationNodeOrder();
+    selectedShapeId = model.id;
     if (!transformer) {
       transformer = new Konva.Transformer({ rotateEnabled: true, enabledAnchors: ['top-left','top-right','bottom-left','bottom-right'] });
       annotationsLayer.add(transformer);
     }
+    node.moveToTop();
     if (model.type === 'rectangle' || model.type === 'circle') {
       // 円は等倍スケール、矩形は自由比率
       transformer.keepRatio(model.type === 'circle');
       transformer.nodes([node]);
-      annotationsLayer.draw();
+      transformer.moveToTop();
     } else {
       transformer.nodes([]);
       drawAnchorsForModel(model, node);
     }
+    syncAnnotationListSelection();
+    annotationsLayer.draw();
   }
 
   // アンカー描画（線/多角形/平行四辺形）
@@ -753,13 +791,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     node.on('dragend', () => {
       const model = findModelByNode(node);
-      if (!model) { node.position({ x: 0, y: 0 }); return; }
-      // モデル座標を反映したノード形状へ置き換え、その後ローカル座標(0,0)に戻す
-      redrawNodeFromModel(model, node);
-      node.position({ x: 0, y: 0 });
+      // 点配列の形状だけが redrawNodeFromModel 内で位置を (0,0) に正規化される。
+      // 矩形と円はモデルの x/y をノード位置として保持する。
+      if (model) redrawNodeFromModel(model, node);
+      const ow = node.getAttr('_origStrokeWidth');
+      if (ow !== undefined && ow !== null) {
+        node.strokeWidth(ow);
+        node.setAttr('_origStrokeWidth', null);
+      }
       annotationsLayer.batchDraw();
-      const ow = node.getAttr('_origStrokeWidth'); if (ow) { node.strokeWidth(ow); node.setAttr('_origStrokeWidth', null); annotationsLayer.batchDraw(); }
-    }); // ローカル座標に戻す
+    });
     node.on('transformend', () => {
       const model = findModelByNode(node); if (!model) return;
       if (model.type === 'rectangle') {
@@ -919,7 +960,7 @@ document.addEventListener('DOMContentLoaded', () => {
       id: idSeq++, type: 'circle', colorHex: colorForStroke(), thickness: defaultThickness,
       x: Math.round(draft.node.x() / canvasScale), y: Math.round(draft.node.y() / canvasScale), radius: Math.round(r / canvasScale)
     };
-    draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
+    registerFinalizedShapeNode(draft.node, model);
     shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
@@ -927,7 +968,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function startRect(pos) {
     draft = {
       type: 'rectangle', start: { x: pos.x, y: pos.y },
-      node: new Konva.Rect({ x: pos.x, y: pos.y, width: 0, height: 0, ...commonStrokeProps(defaultThickness), draggable: true })
+      node: new Konva.Rect({ x: pos.x, y: pos.y, width: 0, height: 0, ...commonStrokeProps(defaultThickness), draggable: false })
     };
     annotationsLayer.add(draft.node);
     annotationsLayer.draw();
@@ -947,8 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
       x: Math.round(draft.node.x() / canvasScale), y: Math.round(draft.node.y() / canvasScale),
       width: Math.round(draft.node.width() / canvasScale), height: Math.round(draft.node.height() / canvasScale)
     };
-    draft.node.setAttr('shapeId', model.id);
-    attachCommonNodeHandlers(draft.node);
+    registerFinalizedShapeNode(draft.node, model);
     shapes.push(model);
     draft = null; advanceWorkspaceRevision(); annotationsLayer.draw(); updateAnnotationList();
   }
@@ -982,7 +1022,7 @@ document.addEventListener('DOMContentLoaded', () => {
       id: idSeq++, type: 'line', colorHex: colorForStroke(), thickness: defaultThickness,
       x1: Math.round(p[0] / canvasScale), y1: Math.round(p[1] / canvasScale), x2: Math.round(p[2] / canvasScale), y2: Math.round(p[3] / canvasScale)
     };
-    draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
+    registerFinalizedShapeNode(draft.node, model);
     shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
@@ -1009,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const pts = draft.points; if (pts.length < 6) { draft.node.destroy(); annotationsLayer.draw(); draft = null; return; }
     hideCoordinates(); draft.node.closed(true);
     const model = { id: idSeq++, type: 'polygon', colorHex: colorForStroke(), thickness: defaultThickness, points: pts.map(v => Math.round(v / canvasScale)) };
-    draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
+    registerFinalizedShapeNode(draft.node, model);
     shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
@@ -1055,7 +1095,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const pts = draft.node.points(); if (pts.length < 8) { draft.node.destroy(); annotationsLayer.draw(); draft = null; return; }
     const modelPts = pts.slice(0, 8).map(v => Math.round(v / canvasScale));
     const model = { id: idSeq++, type: 'parallelogram', colorHex: colorForStroke(), thickness: defaultThickness, points: modelPts };
-    draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
+    registerFinalizedShapeNode(draft.node, model);
     shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
@@ -1063,17 +1103,34 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateAnnotationList() {
     annotationList.innerHTML = '';
     shapes.forEach((s, idx) => {
-      const item = document.createElement('div'); item.className = 'annotation-item';
-      const swatch = `display:inline-block;width:12px;height:12px;background-color:${s.colorHex || '#000'};margin-right:5px;border:1px solid #ccc;`;
-      item.innerHTML = `
-        <div style="${swatch}"></div>
-        <strong>${shapeTitle(s, idx)}</strong><br>
-        ${shapeSummary(s)}
-      `;
+      const title = shapeTitle(s, idx);
+      const item = document.createElement('div');
+      item.className = 'annotation-item';
+      item.dataset.shapeId = String(s.id);
+      item.classList.toggle('selected', selectedShapeId === s.id);
+
+      const selectButton = document.createElement('button');
+      selectButton.type = 'button';
+      selectButton.className = 'annotation-select-btn';
+      selectButton.setAttribute('aria-label', `${title}を選択`);
+      selectButton.setAttribute('aria-pressed', selectedShapeId === s.id ? 'true' : 'false');
+
+      const swatch = document.createElement('span');
+      swatch.className = 'annotation-color-swatch';
+      swatch.style.backgroundColor = s.colorHex || '#000';
+      const titleText = document.createElement('strong');
+      titleText.textContent = title;
+      const summary = document.createElement('span');
+      summary.className = 'annotation-summary';
+      summary.textContent = shapeSummary(s);
+      selectButton.append(swatch, titleText, document.createElement('br'), summary);
+      selectButton.addEventListener('click', () => selectAnnotationById(s.id));
+
       const del = document.createElement('button'); del.className = 'delete-btn'; del.textContent = '削除';
+      del.type = 'button';
+      del.setAttribute('aria-label', `${title}を削除`);
       del.addEventListener('click', (e) => { e.stopPropagation(); deleteAnnotationByIndex(idx); });
-      item.appendChild(del);
-      item.addEventListener('click', () => highlightShape(s.id));
+      item.append(selectButton, del);
       annotationList.appendChild(item);
     });
     if (shapes.length === 0) {
@@ -1082,6 +1139,12 @@ document.addEventListener('DOMContentLoaded', () => {
       annotationList.appendChild(msg);
     }
     updateJsonDisplay();
+  }
+
+  function selectAnnotationById(id) {
+    const node = findAnnotationNodeById(id);
+    if (!node || !setCurrentTool('select', { announce: false })) return;
+    onSelectShape(node);
   }
 
   function shapeTitle(s, idx) {
@@ -1103,15 +1166,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function deleteAnnotationByIndex(index) {
     const s = shapes[index]; if (!s) return;
-    const node = annotationsLayer.findOne((n) => n.getAttr('shapeId') === s.id);
+    const node = findAnnotationNodeById(s.id);
+    if (selectedShapeId === s.id) clearSelection();
     if (node) node.destroy(); shapes.splice(index, 1); advanceWorkspaceRevision(); annotationsLayer.draw();
     showNotification(`${shapeTitle(s, index)} を削除しました`); updateAnnotationList();
-  }
-
-  function highlightShape(id) {
-    const node = annotationsLayer.findOne((n) => n.getAttr('shapeId') === id); if (!node) return;
-    const orig = node.strokeWidth(); node.strokeWidth(orig + 4); annotationsLayer.draw();
-    setTimeout(() => { node.strokeWidth(orig); annotationsLayer.draw(); }, 800);
   }
 
   function updateJsonDisplay() {
@@ -2046,30 +2104,30 @@ document.addEventListener('DOMContentLoaded', () => {
       if (shape === 'rectangle') {
         if (!isFinite(it.x)||!isFinite(it.y)||!isFinite(it.width)||!isFinite(it.height)) { skip++; continue; }
         const model = { id: idSeq++, type: 'rectangle', colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), width: Math.round(it.width), height: Math.round(it.height) };
-        const node = new Konva.Rect({ x: model.x * canvasScale, y: model.y * canvasScale, width: model.width * canvasScale, height: model.height * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: true });
-        node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
+        const node = new Konva.Rect({ x: model.x * canvasScale, y: model.y * canvasScale, width: model.width * canvasScale, height: model.height * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: false });
+        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else if (shape === 'line') {
         if (!isFinite(it.x1)||!isFinite(it.y1)||!isFinite(it.x2)||!isFinite(it.y2)) { skip++; continue; }
         const model = { id: idSeq++, type: 'line', colorHex, thickness, x1: Math.round(it.x1), y1: Math.round(it.y1), x2: Math.round(it.x2), y2: Math.round(it.y2) };
         const pts = [model.x1 * canvasScale, model.y1 * canvasScale, model.x2 * canvasScale, model.y2 * canvasScale];
-        const node = new Konva.Line({ points: pts, ...commonStrokeProps(thickness, colorHex), draggable: true, hitStrokeWidth: Math.max(8, thickness) });
-        node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
+        const node = new Konva.Line({ points: pts, ...commonStrokeProps(thickness, colorHex), draggable: false, hitStrokeWidth: Math.max(8, thickness) });
+        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else if (shape === 'polygon' || shape === 'parallelogram') {
         if (!Array.isArray(it.points) || it.points.length < 6 || it.points.length % 2 !== 0) { skip++; continue; }
         const pts = it.points.map(v => Math.round(v));
         const model = { id: idSeq++, type: shape, colorHex, thickness, points: pts };
         const scaled = pts.map(v => v * canvasScale);
-        const node = new Konva.Line({ points: scaled, closed: true, ...commonStrokeProps(thickness, colorHex), draggable: true });
-        node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
+        const node = new Konva.Line({ points: scaled, closed: true, ...commonStrokeProps(thickness, colorHex), draggable: false });
+        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else if (shape === 'circle') {
         if (!isFinite(it.x)||!isFinite(it.y)||!isFinite(it.radius)) { skip++; continue; }
         const model = { id: idSeq++, type: 'circle', colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), radius: Math.round(it.radius) };
-        const node = new Konva.Circle({ x: model.x * canvasScale, y: model.y * canvasScale, radius: model.radius * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: true });
+        const node = new Konva.Circle({ x: model.x * canvasScale, y: model.y * canvasScale, radius: model.radius * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: false });
         node.strokeScaleEnabled(false);
-        node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
+        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else {
         skip++;

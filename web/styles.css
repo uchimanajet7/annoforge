@@ -256,6 +256,47 @@ button:hover {
   background-color: #f0f0f0;
 }
 
+.annotation-item.selected,
+.annotation-item.selected:hover {
+  border: 2px solid #3498db;
+  background-color: #e9f5fc;
+  box-shadow: inset 4px 0 0 #2c3e50, 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.annotation-select-btn {
+  width: 100%;
+  padding: 0 54px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  transition: none;
+}
+
+.annotation-select-btn:hover {
+  background: transparent;
+}
+
+.annotation-select-btn:focus-visible {
+  outline: 3px solid #2c3e50;
+  outline-offset: 3px;
+}
+
+.annotation-color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 5px;
+  border: 1px solid #777;
+}
+
+.annotation-summary {
+  overflow-wrap: anywhere;
+}
+
 .delete-btn {
   position: absolute;
   top: 10px;
