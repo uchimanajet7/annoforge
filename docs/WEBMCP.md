@@ -1,11 +1,11 @@
-# AnnoForge WebMCP 仕様
+# AnnoForge WebMCP（ChatGPT Site tools）仕様
 
-- 仕様バージョン: 3.3
+- 仕様バージョン: 3.4
 - 人向け機能仕様: [SPEC.md](./SPEC.md)
 
 ## 1. 適用範囲
 
-本仕様は、ブラウザーで開いている AnnoForge が WebMCP を介して提供する機能、外部インターフェース、制約、エラー時の動作を定義する。
+本仕様は、ブラウザーで開いている AnnoForge が、提案中の [WebMCP API](https://webmachinelearning.github.io/webmcp/) を介して提供する機能、外部インターフェース、制約、エラー時の動作を定義する。ChatGPT Site tools は、この API に対応するクライアント実装の一つとして扱う。
 
 WebMCP ツールと人向け UI は、同じブラウザーセッションの画像とアノテーションを共有する。どちらから行った変更も同じ作業状態へ反映する。
 
@@ -27,7 +27,9 @@ WebMCP ツールと人向け UI は、同じブラウザーセッションの画
 
 `document.modelContext.registerTool()` が利用できない場合、ツールを登録しない。この場合も人向け UI は利用でき、WebMCP 用の UI やエラーは表示しない。
 
-ツールは AnnoForge のトップレベルページが登録する。iframe 内のページからは登録しない。
+AnnoForge は、`document.modelContext.registerTool()` が利用可能なページでツールを登録する。[ChatGPT Site tools](https://learn.chatgpt.com/docs/webmcp) の組み込みブラウザーは iframe 内のツールを検出しないため、ChatGPT Site tools では AnnoForge をトップレベルページとして開く。
+
+外部または利用者指定の画像に由来するデータを返す `get_image_preview` と `export_annotated_image` は、`untrustedContentHint: true` として登録する。他のツールは、返却値を AnnoForge が生成する検証済みの状態・メタデータに限定し、`untrustedContentHint: false` とする。
 
 ### 2.2 作業状態と revision
 
@@ -50,7 +52,7 @@ revision が一致しない場合、ツールはエラーを返し、作業状�
 - ツール入力はオブジェクトとする。
 - 必須フィールドがない入力を拒否する。
 - 定義されていないフィールドを含む入力を拒否する。
-- 数値フィールドは有限数とする。
+- 数値フィールドは有限数とする。`draw` の座標、寸法、半径、点配列の要素は安全な整数とし、`thickness` は有限数とする。
 - `revision` と `expectedRevision` は0以上の安全な整数とする。
 - ツールは `AbortSignal` によるキャンセルを受け付ける。
 
@@ -72,8 +74,9 @@ revision が一致しない場合、ツールはエラーを返し、作業状�
 - ファイル出力は、成果物の生成、ブラウザーへのダウンロード要求、ブラウザーによる保存完了、会話への表示または添付を別の状態として扱う。
 - `outcome: "download_requested"` は、AnnoForge が成果物を生成し、ブラウザーへダウンロード要求を送信したことだけを表す。ブラウザーによる保存完了、キャンセル、保存先は確認していない。
 - `outcome: "data_returned"` は、Data URL を WebMCP のツール結果オブジェクト内の文字列として呼び出し元へ返したことだけを表す。呼び出し元による画像表示、ファイル化、会話添付は確認していない。
-- ツール結果は、通常のブラウザー操作を実行する許可や指示を含まない。WebMCP ツールがエラーになった場合または保存完了を確認できない場合、呼び出し側は、利用者が通常のブラウザー操作を許可しているときだけ、既存の画面上の保存操作を使用できる。
-- AnnoForge は WebMCP 失敗時に通常のブラウザー操作へ自動で切り替えず、独自の `fallback` フィールドも返さない。実行経路の選択と権限確認は呼び出し側の責務とする。
+- 現行の WebMCP 仕様案は、命令的ツールの戻り値を JSON 文字列へ直列化して呼び出し元へ渡す。画像などの非テキスト結果型はまだ仕様化されていないため、AnnoForge は未定義の MCP 画像コンテンツ形式を返さず、PNG を `dataUrl` 文字列またはブラウザーへのダウンロード要求として提供する。
+- ツール結果は、通常のブラウザー操作を要求する独自の指示や `fallback` フィールドを含まない。
+- AnnoForge は通常のブラウザー操作へ自動で切り替えない。必要なSite toolの不在、ツール実行エラー、またはツール結果後のブラウザー保存・会話提示を確認できない場合に、呼び出し側が既存UIや通常のファイル機能へ切り替えるかどうかは本インターフェースの範囲外であり、利用者の依頼と対応クライアントの通常の権限・確認手順に従う。ツール結果自体は切替の操作許可にならず、切替後の操作をWebMCPとして扱わない。
 
 ## 3. データ仕様
 
@@ -107,11 +110,11 @@ URL から取得する画像データは12 MiB以下とする。Data URL は12 �
 
 | `shape` | フィールド | 制約 |
 |---|---|---|
-| `rectangle` | `x`, `y`, `width`, `height` | すべて有限数。`width` と `height` は5以上 |
-| `line` | `x1`, `y1`, `x2`, `y2` | すべて有限数。線分長は5以上 |
-| `polygon` | `points` | `[x1, y1, x2, y2, ...]` 形式の有限数配列。偶数要素かつ6要素以上 |
-| `parallelogram` | `points` | 連続する4頂点を表す有限数配列。8要素 |
-| `circle` | `x`, `y`, `radius` | すべて有限数。`radius` は3以上 |
+| `rectangle` | `x`, `y`, `width`, `height` | すべて安全な整数。`width` と `height` は5以上 |
+| `line` | `x1`, `y1`, `x2`, `y2` | すべて安全な整数。線分長は5以上 |
+| `polygon` | `points` | `[x1, y1, x2, y2, ...]` 形式の安全な整数配列。偶数要素かつ6要素以上 |
+| `parallelogram` | `points` | 連続する4頂点を表す安全な整数配列。8要素 |
+| `circle` | `x`, `y`, `radius` | すべて安全な整数。`radius` は3以上 |
 
 回転角はアノテーション JSON に含めない。
 
@@ -147,7 +150,7 @@ URL の許可条件:
 - HTTP URL は、現在のページが `127.0.0.1`、`localhost`、または `::1` の HTTP ページであり、画像 URL がそのページと同一オリジンの場合だけ許可する。
 - リダイレクト後の URL にも同じ条件を適用する。
 - 取得時に資格情報とリファラーを送信せず、キャッシュを使用しない。
-- 配信元が CORS を許可していることを必要とする。
+- クロスオリジンの URL では、配信元が CORS を許可していることを必要とする。同一オリジンの HTTPS URL では CORS の応答ヘッダーを必要としない。
 - HTTP 応答、MIME、データサイズ、画像デコードを検証する。
 
 成功結果:
@@ -173,6 +176,8 @@ URL の許可条件:
 | `dataUrl` | string | 必須 | `data:image/png;base64,`、`data:image/jpeg;base64,`、`data:image/webp;base64,` のいずれかで始まる base64 Data URL |
 
 Data URL の構文、文字数、base64、復号後サイズ、画像デコードを検証する。
+
+Data URL はツールの呼び出し側が入力として渡す。AnnoForge が会話の添付ファイルを直接読み取ったり、添付ファイルから Data URL を生成したりするものではない。
 
 成功結果と状態変更は `open_image_from_url` と同じとする。
 

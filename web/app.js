@@ -1402,18 +1402,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (annotation.shape === 'rectangle') {
         assertWebMcpExactKeys(annotation, ['shape', 'x', 'y', 'width', 'height', 'color', 'thickness'], path);
-        assertWebMcpFiniteNumber(annotation.x, `${path}.x`);
-        assertWebMcpFiniteNumber(annotation.y, `${path}.y`);
-        assertWebMcpFiniteNumber(annotation.width, `${path}.width`);
-        assertWebMcpFiniteNumber(annotation.height, `${path}.height`);
+        assertWebMcpSafeInteger(annotation.x, `${path}.x`);
+        assertWebMcpSafeInteger(annotation.y, `${path}.y`);
+        assertWebMcpSafeInteger(annotation.width, `${path}.width`);
+        assertWebMcpSafeInteger(annotation.height, `${path}.height`);
         if (annotation.width < 5) throw new TypeError(`${path}.width は5以上である必要があります`);
         if (annotation.height < 5) throw new TypeError(`${path}.height は5以上である必要があります`);
       } else if (annotation.shape === 'line') {
         assertWebMcpExactKeys(annotation, ['shape', 'x1', 'y1', 'x2', 'y2', 'color', 'thickness'], path);
-        assertWebMcpFiniteNumber(annotation.x1, `${path}.x1`);
-        assertWebMcpFiniteNumber(annotation.y1, `${path}.y1`);
-        assertWebMcpFiniteNumber(annotation.x2, `${path}.x2`);
-        assertWebMcpFiniteNumber(annotation.y2, `${path}.y2`);
+        assertWebMcpSafeInteger(annotation.x1, `${path}.x1`);
+        assertWebMcpSafeInteger(annotation.y1, `${path}.y1`);
+        assertWebMcpSafeInteger(annotation.x2, `${path}.x2`);
+        assertWebMcpSafeInteger(annotation.y2, `${path}.y2`);
         if (Math.hypot(annotation.x2 - annotation.x1, annotation.y2 - annotation.y1) < 5) {
           throw new TypeError(`${path} の線の長さは5以上である必要があります`);
         }
@@ -1425,9 +1425,9 @@ document.addEventListener('DOMContentLoaded', () => {
         assertWebMcpPoints(annotation.points, path, 8, true);
       } else if (annotation.shape === 'circle') {
         assertWebMcpExactKeys(annotation, ['shape', 'x', 'y', 'radius', 'color', 'thickness'], path);
-        assertWebMcpFiniteNumber(annotation.x, `${path}.x`);
-        assertWebMcpFiniteNumber(annotation.y, `${path}.y`);
-        assertWebMcpFiniteNumber(annotation.radius, `${path}.radius`);
+        assertWebMcpSafeInteger(annotation.x, `${path}.x`);
+        assertWebMcpSafeInteger(annotation.y, `${path}.y`);
+        assertWebMcpSafeInteger(annotation.radius, `${path}.radius`);
         if (annotation.radius < 3) throw new TypeError(`${path}.radius は3以上である必要があります`);
       } else {
         throw new TypeError(`${path}.shape は rectangle、line、polygon、parallelogram、circle のいずれかである必要があります`);
@@ -1508,6 +1508,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!Number.isFinite(value)) throw new TypeError(`${path} は有限数である必要があります`);
   }
 
+  function assertWebMcpSafeInteger(value, path) {
+    if (!Number.isSafeInteger(value)) throw new TypeError(`${path} は安全な整数である必要があります`);
+  }
+
   function assertWebMcpRevision(value, path) {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new TypeError(`${path} は0以上の安全な整数である必要があります`);
@@ -1521,7 +1525,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function assertWebMcpPoints(points, path, requiredLength, exactLength) {
-    if (!Array.isArray(points)) throw new TypeError(`${path}.points は数値配列である必要があります`);
+    if (!Array.isArray(points)) throw new TypeError(`${path}.points は整数配列である必要があります`);
     if (exactLength && points.length !== requiredLength) {
       throw new TypeError(`${path}.points は正確に${requiredLength}要素である必要があります`);
     }
@@ -1530,7 +1534,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (points.length % 2 !== 0) throw new TypeError(`${path}.points は偶数要素である必要があります`);
     for (let index = 0; index < points.length; index++) {
-      assertWebMcpFiniteNumber(points[index], `${path}.points[${index}]`);
+      assertWebMcpSafeInteger(points[index], `${path}.points[${index}]`);
     }
   }
 
@@ -1590,6 +1594,24 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    const coordinateInputSchema = {
+      type: 'integer',
+      minimum: Number.MIN_SAFE_INTEGER,
+      maximum: Number.MAX_SAFE_INTEGER
+    };
+
+    const sizeInputSchema = {
+      type: 'integer',
+      minimum: 5,
+      maximum: Number.MAX_SAFE_INTEGER
+    };
+
+    const radiusInputSchema = {
+      type: 'integer',
+      minimum: 3,
+      maximum: Number.MAX_SAFE_INTEGER
+    };
+
     const replaceAnnotationsInputSchema = {
       type: 'object',
       additionalProperties: false,
@@ -1609,10 +1631,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 required: ['shape', 'x', 'y', 'width', 'height', 'color', 'thickness'],
                 properties: {
                   shape: { const: 'rectangle' },
-                  x: { type: 'number' },
-                  y: { type: 'number' },
-                  width: { type: 'number', minimum: 5 },
-                  height: { type: 'number', minimum: 5 },
+                  x: coordinateInputSchema,
+                  y: coordinateInputSchema,
+                  width: sizeInputSchema,
+                  height: sizeInputSchema,
                   color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
                   thickness: { type: 'number', exclusiveMinimum: 0 }
                 }
@@ -1623,10 +1645,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 required: ['shape', 'x1', 'y1', 'x2', 'y2', 'color', 'thickness'],
                 properties: {
                   shape: { const: 'line' },
-                  x1: { type: 'number' },
-                  y1: { type: 'number' },
-                  x2: { type: 'number' },
-                  y2: { type: 'number' },
+                  x1: coordinateInputSchema,
+                  y1: coordinateInputSchema,
+                  x2: coordinateInputSchema,
+                  y2: coordinateInputSchema,
                   color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
                   thickness: { type: 'number', exclusiveMinimum: 0 }
                 }
@@ -1640,7 +1662,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   points: {
                     type: 'array',
                     minItems: 6,
-                    items: { type: 'number' }
+                    items: coordinateInputSchema
                   },
                   color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
                   thickness: { type: 'number', exclusiveMinimum: 0 }
@@ -1656,7 +1678,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     type: 'array',
                     minItems: 8,
                     maxItems: 8,
-                    items: { type: 'number' }
+                    items: coordinateInputSchema
                   },
                   color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
                   thickness: { type: 'number', exclusiveMinimum: 0 }
@@ -1668,9 +1690,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 required: ['shape', 'x', 'y', 'radius', 'color', 'thickness'],
                 properties: {
                   shape: { const: 'circle' },
-                  x: { type: 'number' },
-                  y: { type: 'number' },
-                  radius: { type: 'number', minimum: 3 },
+                  x: coordinateInputSchema,
+                  y: coordinateInputSchema,
+                  radius: radiusInputSchema,
                   color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
                   thickness: { type: 'number', exclusiveMinimum: 0 }
                 }
@@ -1713,7 +1735,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'open_image_from_url',
         title: 'URLから画像を開く',
-        description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、CORSで取得可能なHTTPS URLまたは同一オリジンのloopback URLから開きます。成功時は既存アノテーションを消去します。',
+        description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、HTTPS URL（クロスオリジンの場合は配信元のCORS許可が必要）または同一オリジンのloopback HTTP URLから開きます。成功時は既存アノテーションを消去します。',
         inputSchema: urlImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1729,7 +1751,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'open_image_from_data_url',
         title: 'Data URLから画像を開く',
-        description: '現在の版が expectedRevision と一致する場合だけ、会話側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。成功時は既存アノテーションを消去します。',
+        description: '現在の版が expectedRevision と一致する場合だけ、呼び出し側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。会話の添付ファイルを直接読み取る機能ではありません。成功時は既存アノテーションを消去します。',
         inputSchema: dataUrlImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1779,7 +1801,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inputSchema: previewInputSchema,
         annotations: {
           readOnlyHint: true,
-          untrustedContentHint: false
+          untrustedContentHint: true
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1792,7 +1814,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'replace_annotations',
         title: 'アノテーションを置換',
-        description: '現在の版が expectedRevision と一致する場合だけ、全アノテーションを指定された AnnoForge draw 配列で置き換えます。空配列は全消去です。全項目の検証後にだけ変更します。',
+        description: '現在の版が expectedRevision と一致する場合だけ、全アノテーションを整数ピクセル座標の AnnoForge draw 配列で置き換えます。空配列は全消去です。全項目の検証後にだけ変更します。',
         inputSchema: replaceAnnotationsInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1837,7 +1859,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inputSchema: exportImageInputSchema,
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: false
+          untrustedContentHint: true
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
