@@ -20,3 +20,6 @@ infra/terraform/*.auto.tfvars
 /python
 scripts/deploy/.venv-build-layer
 scripts/deploy/python
+
+# ローカル取得ツール
+/tools/

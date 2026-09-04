@@ -31,7 +31,7 @@ brew install awscli jq
 - ShellCheck: 0.9.0 以上。Homebrew stable を推奨します。
 - Terraform: 1.5.x–1.7.x。本リポは 1.5+ を前提とします。
 - AWS CLI: v2。任意です。デプロイで使います。
-- Python: 3.13。任意です。Pillow Layer のローカル生成で使います。
+- Python: 3.13。Pillow Layer のローカル生成で使います。該当作業を行わない場合は任意です。
 - jq: 1.6。任意です。スモーク時の JSON 整形で使います。
 
 ### 任意: 一括セットアップ
@@ -65,6 +65,41 @@ bash scripts/tools/check_updates.sh   # 任意: 最新差分を確認
 bash scripts/tools/lint_shell.sh --strict
 bash scripts/tools/fmt_terraform.sh --check
 ```
+
+## 3.5) WebMCPのローカル静的サーバー
+
+未公開のローカル版をWebMCP対応ブラウザーで使うときだけ使用します。通常の人向けローカル利用では、従来どおり `web/index.html` を直接開けます。
+
+```
+bash scripts/tools/web/start-local-web.sh
+```
+
+- URL: `http://127.0.0.1:8000/`
+- 待受け: `127.0.0.1` のみ
+- 終了: 起動したターミナルで `Ctrl+C`。起動スクリプトがSWSへシグナルを転送し、終了を待ちます。
+- ポート: 既定は8000。変更する場合だけ `SWS_PORT=8001 bash scripts/tools/web/start-local-web.sh` とします。
+- 配信範囲: `web/` の静的ファイルだけです。ディレクトリ一覧、シンボリックリンク追跡、アップロード・書込みAPIはありません。
+- 実装: 起動時に GitHub Releases API で最新安定版を確認します。初回、または承認した更新時に対象OS/CPUの公式配布物を取得し、Release assetのSHA-256 digestと版番号の検証成功後だけ `tools/web/static-web-server` へ配置します。
+- 作業領域: 取得・展開・キャッシュはリポジトリ内の無視対象 `tools/web/` だけを使います。OS一時領域は使いません。
+- 更新: 配置済み版と最新安定版が異なる対話起動では、置換確認の既定値はYesです。非対話起動では明示指定なしに置換しません。
+- ポート競合: LISTENプロセスを表示し、停止確認の既定値はNoです。承認時はSIGTERM後に最大5秒待ち、残存時だけSIGKILLを別確認します。
+- 用途: WebMCPページを通常のHTTPオリジンで扱うための開発補助です。MCPサーバーや製品バックエンドではありません。
+
+補助指定は通常利用では不要です。自動実行や版を明示する場合だけ使用します。
+
+- `SWS_VERSION=<version|vversion|latest>`: 指定版を確認なしで取得または再利用します。配置済みの指定版はネットワーク確認なしで再利用できます。
+- `SWS_AUTO_UPDATE=1` または `SWS_ASSUME_YES=1`: 非対話環境を含め、更新確認を省略します。
+- `SWS_ASSUME_NO=1`: 更新候補があっても配置済み版を利用します。
+- `SWS_FORCE_KILL=1`: SIGTERMで終了しないプロセスに対するSIGKILL確認を省略します。ポート競合時の最初の停止確認は省略しません。
+
+通常経路:
+
+1. `http://127.0.0.1:8000/` を対応内蔵ブラウザーで開く。
+2. `get_annotations` で初期revisionを取得する。
+3. `open_image_from_data_url` または `open_image_from_url` で画像を開く。
+4. `get_image_preview`、`replace_annotations`、`get_annotations` で対象、反映内容、見た目を確認する。プレビューは元画像の縦横比を保ち、指定最大辺以内で、表示のパン・ズーム・選択表示に依存しないことを確認する。
+5. `export_annotated_image` の `data_url` で完成PNGを取得し、返却寸法が元画像寸法と一致することを確認する。人向け保存が必要な場合だけダウンロードを開始する。
+6. 終了後、起動したターミナルで `Ctrl+C` を押す。
 
 ## 4) CI と同じチェックをローカルで実行
 - Shell/Bash。警告もエラー扱いです。CI と同条件です。
