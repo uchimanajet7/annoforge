@@ -1,0 +1,11 @@
+[general]
+cache-control-headers = false
+directory-listing = false
+
+[[advanced.headers]]
+source = "**/*"
+
+[advanced.headers.headers]
+Cache-Control = "no-store, max-age=0, must-revalidate"
+Pragma = "no-cache"
+Expires = "0"

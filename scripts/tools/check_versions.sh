@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/../lib/ui.sh"; ui::init
 
 # 開始/終了タイムスタンプ
@@ -40,3 +41,8 @@ ui::info tools "pip: $(pip --version 2>/dev/null || echo 'not found')"
 ui::info tools "zip: $(zip -v 2>/dev/null | head -n1 || echo 'not found')"
 ui::info tools "curl: $(curl --version 2>/dev/null | head -n1 || echo 'not found')"
 ui::info tools "jq: $(jq --version 2>/dev/null || echo 'not found')"
+if [[ -x "${ROOT_DIR}/tools/web/static-web-server" ]]; then
+  ui::info tools "Static Web Server: $("${ROOT_DIR}/tools/web/static-web-server" --version 2>/dev/null | head -n1 || echo 'version check failed')"
+else
+  ui::info tools "Static Web Server: not installed (downloaded by scripts/tools/web/start-local-web.sh)"
+fi

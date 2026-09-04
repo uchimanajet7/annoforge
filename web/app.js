@@ -104,6 +104,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 形状モデル配列（原寸座標で保持）
   const shapes = []; // { id, type, colorHex, thickness, ...geometry }
+  let workspaceRevision = 0;
+  const WEBMCP_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+  const WEBMCP_MAX_DATA_URL_LENGTH = 12 * 1024 * 1024;
+  const WEBMCP_PREVIEW_DEFAULT_MAX_DIMENSION = 1024;
+  const WEBMCP_PREVIEW_MIN_DIMENSION = 64;
+  const WEBMCP_PREVIEW_MAX_DIMENSION = 2048;
+  const WEBMCP_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+  function advanceWorkspaceRevision() {
+    workspaceRevision += 1;
+  }
 
   function cancelDraft() {
     if (!draft) return;
@@ -227,7 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function bindUI() {
     if (openFileBtn) openFileBtn.addEventListener('click', () => imageInput && imageInput.click());
     imageInput.addEventListener('change', handleImageUpload);
-    clearBtn.addEventListener('click', clearAll);
+    clearBtn.addEventListener('click', () => clearAll());
     copyJsonBtn.addEventListener('click', copyAllAnnotations);
     bindDragAndDrop();
     bindImportModal();
@@ -433,34 +444,76 @@ document.addEventListener('DOMContentLoaded', () => {
   // 画像アップロード処理（D&D/共通）
   function loadImageFile(file) {
     if (!file || !((file.type || '').startsWith('image/'))) return;
-    loadedImageName = file.name || '';
-    // ファイル名は先にUIへ反映（画像読み込み前でも見えるように）
-    updateImageNameUI();
     const reader = new FileReader();
-    reader.onload = (event) => {
-      loadedImage = new Image();
-      loadedImage.onload = () => {
-        placeImage();
-        clearAll(); // 既存の形状を消去
-        // 表示とツール状態を統一: 選択ツール、ステージ倍率1、画像はfit比率で中央配置、選択/ドラフト解除
-        resetView();
-        cancelDraft();
-        clearSelection();
-        currentTool = 'select';
-        try {
-          // ツールボタンのアクティブ表示を選択に戻す
-          toolButtons().forEach(b => b.classList.remove('active'));
-          const selBtn = document.querySelector('.tool-btn[data-tool="select"]');
-          if (selBtn) selBtn.classList.add('active');
-        } catch {}
-        applySelectionUI();
-        stage.draggable(false);
-        updateImageNameUI();
-        showNotification(loadedImageName ? `${loadedImageName} を読み込みました` : '画像を読み込みました');
-      };
-      loadedImage.src = event.target.result;
+    reader.onload = async (event) => {
+      try {
+        const image = await decodeImageSource(event.target.result);
+        commitLoadedImage(image, file.name || '');
+      } catch (error) {
+        console.error('画像の読み込みに失敗しました:', error);
+        showNotification('画像の読み込みに失敗しました', 'error');
+      }
     };
+    reader.onerror = () => showNotification('画像の読み込みに失敗しました', 'error');
     reader.readAsDataURL(file);
+  }
+
+  function decodeImageSource(source, signal) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      let settled = false;
+
+      const cleanup = () => {
+        image.onload = null;
+        image.onerror = null;
+        if (signal) signal.removeEventListener('abort', onAbort);
+      };
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback(value);
+      };
+      const onAbort = () => {
+        image.src = '';
+        const reason = signal && signal.reason;
+        finish(reject, reason instanceof Error ? reason : new DOMException('画像の読み込みがキャンセルされました', 'AbortError'));
+      };
+
+      image.onload = () => finish(resolve, image);
+      image.onerror = () => finish(reject, new Error('取得したデータを画像としてデコードできません'));
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      image.src = source;
+    });
+  }
+
+  function commitLoadedImage(image, imageName) {
+    loadedImage = image;
+    loadedImageName = imageName;
+    placeImage();
+    clearAll({ advanceRevision: false }); // 既存の形状を消去
+    advanceWorkspaceRevision();
+    // 表示とツール状態を統一: 選択ツール、ステージ倍率1、画像はfit比率で中央配置、選択/ドラフト解除
+    resetView();
+    cancelDraft();
+    clearSelection();
+    currentTool = 'select';
+    try {
+      // ツールボタンのアクティブ表示を選択に戻す
+      toolButtons().forEach(b => b.classList.remove('active'));
+      const selBtn = document.querySelector('.tool-btn[data-tool="select"]');
+      if (selBtn) selBtn.classList.add('active');
+    } catch {}
+    applySelectionUI();
+    stage.draggable(false);
+    updateImageNameUI();
+    showNotification(loadedImageName ? `${loadedImageName} を読み込みました` : '画像を読み込みました');
   }
 
   // 画像名のUI更新
@@ -557,8 +610,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 共通ストローク設定
-  function commonStrokeProps(thickness = defaultThickness) {
-    return { stroke: colorForStroke(), strokeWidth: thickness, listening: true };
+  function commonStrokeProps(thickness = defaultThickness, stroke = colorForStroke()) {
+    return { stroke, strokeWidth: thickness, listening: true };
   }
 
   // 図形選択
@@ -590,6 +643,7 @@ document.addEventListener('DOMContentLoaded', () => {
       c.on('dragmove', () => {
         const nx = c.x() / canvasScale; const ny = c.y() / canvasScale;
         updateModelPoint(model, idx, { x: nx, y: ny });
+        advanceWorkspaceRevision();
         redrawNodeFromModel(model, node);
         updateAnnotationList();
       });
@@ -608,6 +662,7 @@ document.addEventListener('DOMContentLoaded', () => {
           } else {
             redrawNodeFromModel(model, node);
           }
+          advanceWorkspaceRevision();
           updateAnnotationList();
         }
       });
@@ -693,6 +748,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dx = node.x(); const dy = node.y(); const pts = node.points();
         for (let i=0;i<pts.length;i+=2) { model.points[i] = Math.round((pts[i] + dx) / canvasScale); model.points[i+1] = Math.round((pts[i+1] + dy) / canvasScale); }
       }
+      advanceWorkspaceRevision();
       updateAnnotationList();
     });
     node.on('dragend', () => {
@@ -713,6 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
         model.y = Math.round(node.y() / canvasScale);
         model.width = Math.round(node.width() / canvasScale);
         model.height = Math.round(node.height() / canvasScale);
+        advanceWorkspaceRevision();
         updateAnnotationList();
       } else if (model.type === 'circle') {
         // Transformerのスケールを半径に正規化し、スケールは1に戻す
@@ -724,6 +781,7 @@ document.addEventListener('DOMContentLoaded', () => {
         model.x = Math.round(node.x() / canvasScale);
         model.y = Math.round(node.y() / canvasScale);
         model.radius = Math.round(newR / canvasScale);
+        advanceWorkspaceRevision();
         updateAnnotationList();
       }
     });
@@ -862,7 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
       x: Math.round(draft.node.x() / canvasScale), y: Math.round(draft.node.y() / canvasScale), radius: Math.round(r / canvasScale)
     };
     draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
-    shapes.push(model); draft = null; updateAnnotationList();
+    shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
   // 矩形作図
@@ -892,7 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
     draft.node.setAttr('shapeId', model.id);
     attachCommonNodeHandlers(draft.node);
     shapes.push(model);
-    draft = null; annotationsLayer.draw(); updateAnnotationList();
+    draft = null; advanceWorkspaceRevision(); annotationsLayer.draw(); updateAnnotationList();
   }
 
   // 直線作図
@@ -925,7 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
       x1: Math.round(p[0] / canvasScale), y1: Math.round(p[1] / canvasScale), x2: Math.round(p[2] / canvasScale), y2: Math.round(p[3] / canvasScale)
     };
     draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
-    shapes.push(model); draft = null; updateAnnotationList();
+    shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
   // 多角形作図
@@ -952,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hideCoordinates(); draft.node.closed(true);
     const model = { id: idSeq++, type: 'polygon', colorHex: colorForStroke(), thickness: defaultThickness, points: pts.map(v => Math.round(v / canvasScale)) };
     draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
-    shapes.push(model); draft = null; updateAnnotationList();
+    shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
   // 平行四辺形作図（3点指定で確定）
@@ -998,7 +1056,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const modelPts = pts.slice(0, 8).map(v => Math.round(v / canvasScale));
     const model = { id: idSeq++, type: 'parallelogram', colorHex: colorForStroke(), thickness: defaultThickness, points: modelPts };
     draft.node.setAttr('shapeId', model.id); draft.node.draggable(true); attachCommonNodeHandlers(draft.node);
-    shapes.push(model); draft = null; updateAnnotationList();
+    shapes.push(model); draft = null; advanceWorkspaceRevision(); updateAnnotationList();
   }
 
   // 一覧とJSON表示の更新
@@ -1046,7 +1104,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function deleteAnnotationByIndex(index) {
     const s = shapes[index]; if (!s) return;
     const node = annotationsLayer.findOne((n) => n.getAttr('shapeId') === s.id);
-    if (node) node.destroy(); shapes.splice(index, 1); annotationsLayer.draw();
+    if (node) node.destroy(); shapes.splice(index, 1); advanceWorkspaceRevision(); annotationsLayer.draw();
     showNotification(`${shapeTitle(s, index)} を削除しました`); updateAnnotationList();
   }
 
@@ -1058,8 +1116,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateJsonDisplay() {
     if (shapes.length === 0) { jsonDisplay.textContent = 'アノテーションがありません'; return; }
-    const allJson = { draw: shapes.map(shapeToJson) };
+    const allJson = getAnnotationDocument();
     jsonDisplay.textContent = JSON.stringify(allJson, null, 2);
+  }
+  function getAnnotationDocument() {
+    return { draw: shapes.map(shapeToJson) };
   }
   function shapeToJson(s) {
     const colorHex = (s.colorHex || '#000000').substring(1);
@@ -1069,6 +1130,643 @@ document.addEventListener('DOMContentLoaded', () => {
     if (s.type === 'parallelogram') return { shape: 'parallelogram', points: s.points.slice(), color: colorHex, thickness: s.thickness };
     if (s.type === 'circle') return { shape: 'circle', x: s.x, y: s.y, radius: s.radius, color: colorHex, thickness: s.thickness };
     return {};
+  }
+
+  function validateWebMcpUrlImageInput(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, ['expectedRevision', 'url'], 'input');
+    assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
+    if (typeof input.url !== 'string' || input.url.trim() === '') {
+      throw new TypeError('input.url は空でない絶対URL文字列である必要があります');
+    }
+    return {
+      expectedRevision: input.expectedRevision,
+      url: parseAllowedWebMcpImageUrl(input.url.trim())
+    };
+  }
+
+  function parseAllowedWebMcpImageUrl(value) {
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new TypeError('input.url は有効な絶対URLである必要があります');
+    }
+
+    if (parsed.username || parsed.password) {
+      throw new TypeError('input.url にユーザー名またはパスワードを含めることはできません');
+    }
+    if (parsed.protocol === 'https:') return parsed;
+
+    const pageUrl = new URL(window.location.href);
+    if (
+      parsed.protocol === 'http:' &&
+      pageUrl.protocol === 'http:' &&
+      isLoopbackHostname(pageUrl.hostname) &&
+      parsed.origin === pageUrl.origin
+    ) {
+      return parsed;
+    }
+
+    throw new TypeError('input.url はHTTPS、または現在のloopbackページと同一オリジンのHTTP URLである必要があります');
+  }
+
+  function isLoopbackHostname(hostname) {
+    const normalized = String(hostname || '').toLowerCase();
+    return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '[::1]' || normalized === '::1';
+  }
+
+  async function openWebMcpImageFromUrl(openInput, signal) {
+    assertCurrentWorkspaceRevision(openInput.expectedRevision);
+    throwIfWebMcpExecutionAborted(signal);
+
+    let response;
+    try {
+      response = await fetch(openInput.url.href, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+        signal
+      });
+    } catch (error) {
+      throwIfWebMcpExecutionAborted(signal);
+      throw new Error('画像URLを取得できません。URL、ネットワーク、または配信元のCORS設定を確認してください');
+    }
+
+    if (!response.ok) {
+      throw new Error(`画像URLの取得に失敗しました（HTTP ${response.status}）`);
+    }
+    parseAllowedWebMcpImageUrl(response.url || openInput.url.href);
+
+    const contentType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+    if (!WEBMCP_IMAGE_MIME_TYPES.has(contentType)) {
+      throw new TypeError('画像URLのContent-Typeはimage/png、image/jpeg、image/webpのいずれかである必要があります');
+    }
+
+    const contentLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > WEBMCP_MAX_IMAGE_BYTES) {
+      throw new RangeError('画像URLのデータは12 MiB以下である必要があります');
+    }
+
+    const blob = await response.blob();
+    throwIfWebMcpExecutionAborted(signal);
+    if (blob.size === 0) throw new TypeError('画像URLから空のデータが返されました');
+    if (blob.size > WEBMCP_MAX_IMAGE_BYTES) throw new RangeError('画像URLのデータは12 MiB以下である必要があります');
+
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const image = await decodeImageSource(objectUrl, signal);
+      throwIfWebMcpExecutionAborted(signal);
+      assertCurrentWorkspaceRevision(openInput.expectedRevision);
+      commitLoadedImage(image, '');
+      return {
+        loaded: true,
+        revision: workspaceRevision,
+        image: {
+          originalWidth: image.naturalWidth,
+          originalHeight: image.naturalHeight
+        }
+      };
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  function validateWebMcpDataUrlImageInput(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, ['expectedRevision', 'dataUrl'], 'input');
+    assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
+    if (typeof input.dataUrl !== 'string' || input.dataUrl.length === 0) {
+      throw new TypeError('input.dataUrl は空でないData URL文字列である必要があります');
+    }
+    if (input.dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
+      throw new RangeError('input.dataUrl は12 MiB以下である必要があります');
+    }
+
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]*={0,2})$/.exec(input.dataUrl);
+    if (!match) {
+      throw new TypeError('input.dataUrl はPNG、JPEG、WebPのbase64 Data URLである必要があります');
+    }
+
+    let decodedLength;
+    try {
+      decodedLength = atob(match[2]).length;
+    } catch {
+      throw new TypeError('input.dataUrl のbase64データが不正です');
+    }
+    if (decodedLength === 0) throw new TypeError('input.dataUrl の画像データが空です');
+    if (decodedLength > WEBMCP_MAX_IMAGE_BYTES) {
+      throw new RangeError('input.dataUrl の画像データは12 MiB以下である必要があります');
+    }
+
+    return input;
+  }
+
+  async function openWebMcpImageFromDataUrl(openInput, signal) {
+    assertCurrentWorkspaceRevision(openInput.expectedRevision);
+    throwIfWebMcpExecutionAborted(signal);
+    const image = await decodeImageSource(openInput.dataUrl, signal);
+    throwIfWebMcpExecutionAborted(signal);
+    assertCurrentWorkspaceRevision(openInput.expectedRevision);
+    commitLoadedImage(image, '');
+    return {
+      loaded: true,
+      revision: workspaceRevision,
+      image: {
+        originalWidth: image.naturalWidth,
+        originalHeight: image.naturalHeight
+      }
+    };
+  }
+
+  function validateWebMcpAnnotationDocument(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, ['draw'], 'input');
+    if (!Array.isArray(input.draw)) throw new TypeError('draw は配列である必要があります');
+
+    for (let index = 0; index < input.draw.length; index++) {
+      const annotation = input.draw[index];
+      const path = `draw[${index}]`;
+      assertWebMcpObject(annotation, path);
+
+      if (annotation.shape === 'rectangle') {
+        assertWebMcpExactKeys(annotation, ['shape', 'x', 'y', 'width', 'height', 'color', 'thickness'], path);
+        assertWebMcpFiniteNumber(annotation.x, `${path}.x`);
+        assertWebMcpFiniteNumber(annotation.y, `${path}.y`);
+        assertWebMcpFiniteNumber(annotation.width, `${path}.width`);
+        assertWebMcpFiniteNumber(annotation.height, `${path}.height`);
+        if (annotation.width < 5) throw new TypeError(`${path}.width は5以上である必要があります`);
+        if (annotation.height < 5) throw new TypeError(`${path}.height は5以上である必要があります`);
+      } else if (annotation.shape === 'line') {
+        assertWebMcpExactKeys(annotation, ['shape', 'x1', 'y1', 'x2', 'y2', 'color', 'thickness'], path);
+        assertWebMcpFiniteNumber(annotation.x1, `${path}.x1`);
+        assertWebMcpFiniteNumber(annotation.y1, `${path}.y1`);
+        assertWebMcpFiniteNumber(annotation.x2, `${path}.x2`);
+        assertWebMcpFiniteNumber(annotation.y2, `${path}.y2`);
+        if (Math.hypot(annotation.x2 - annotation.x1, annotation.y2 - annotation.y1) < 5) {
+          throw new TypeError(`${path} の線の長さは5以上である必要があります`);
+        }
+      } else if (annotation.shape === 'polygon') {
+        assertWebMcpExactKeys(annotation, ['shape', 'points', 'color', 'thickness'], path);
+        assertWebMcpPoints(annotation.points, path, 6, false);
+      } else if (annotation.shape === 'parallelogram') {
+        assertWebMcpExactKeys(annotation, ['shape', 'points', 'color', 'thickness'], path);
+        assertWebMcpPoints(annotation.points, path, 8, true);
+      } else if (annotation.shape === 'circle') {
+        assertWebMcpExactKeys(annotation, ['shape', 'x', 'y', 'radius', 'color', 'thickness'], path);
+        assertWebMcpFiniteNumber(annotation.x, `${path}.x`);
+        assertWebMcpFiniteNumber(annotation.y, `${path}.y`);
+        assertWebMcpFiniteNumber(annotation.radius, `${path}.radius`);
+        if (annotation.radius < 3) throw new TypeError(`${path}.radius は3以上である必要があります`);
+      } else {
+        throw new TypeError(`${path}.shape は rectangle、line、polygon、parallelogram、circle のいずれかである必要があります`);
+      }
+
+      if (typeof annotation.color !== 'string' || !/^#?[0-9A-Fa-f]{6}$/.test(annotation.color) || !normalizeHex(annotation.color)) {
+        throw new TypeError(`${path}.color は先頭の # が任意の6桁HEX文字列である必要があります`);
+      }
+      assertWebMcpFiniteNumber(annotation.thickness, `${path}.thickness`);
+      if (annotation.thickness <= 0) throw new TypeError(`${path}.thickness は0より大きい値である必要があります`);
+    }
+
+    return input;
+  }
+
+  function validateWebMcpReplaceInput(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, ['expectedRevision', 'draw'], 'input');
+    assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
+    validateWebMcpAnnotationDocument({ draw: input.draw });
+    return input;
+  }
+
+  function validateWebMcpDownloadInput(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, ['expectedRevision'], 'input');
+    assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
+    return input;
+  }
+
+  function validateWebMcpPreviewInput(input) {
+    assertWebMcpObject(input, 'input');
+    const extraKey = Object.keys(input).find((key) => key !== 'maxDimension');
+    if (extraKey !== undefined) throw new TypeError(`input[${JSON.stringify(extraKey)}] は追加できません`);
+    const maxDimension = input.maxDimension === undefined
+      ? WEBMCP_PREVIEW_DEFAULT_MAX_DIMENSION
+      : input.maxDimension;
+    if (
+      !Number.isSafeInteger(maxDimension) ||
+      maxDimension < WEBMCP_PREVIEW_MIN_DIMENSION ||
+      maxDimension > WEBMCP_PREVIEW_MAX_DIMENSION
+    ) {
+      throw new TypeError(`input.maxDimension は${WEBMCP_PREVIEW_MIN_DIMENSION}以上${WEBMCP_PREVIEW_MAX_DIMENSION}以下の整数である必要があります`);
+    }
+    return { maxDimension };
+  }
+
+  function validateWebMcpExportInput(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, ['expectedRevision', 'delivery'], 'input');
+    assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
+    if (input.delivery !== 'data_url' && input.delivery !== 'download') {
+      throw new TypeError('input.delivery はdata_urlまたはdownloadである必要があります');
+    }
+    return input;
+  }
+
+  function validateWebMcpEmptyInput(input) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, [], 'input');
+    return input;
+  }
+
+  function assertWebMcpObject(value, path) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError(`${path} はオブジェクトである必要があります`);
+    }
+  }
+
+  function assertWebMcpExactKeys(value, expectedKeys, path) {
+    const missingKey = expectedKeys.find((key) => !Object.prototype.hasOwnProperty.call(value, key));
+    if (missingKey) throw new TypeError(`${path}.${missingKey} は必須です`);
+    const extraKey = Object.keys(value).find((key) => !expectedKeys.includes(key));
+    if (extraKey !== undefined) throw new TypeError(`${path}[${JSON.stringify(extraKey)}] は追加できません`);
+  }
+
+  function assertWebMcpFiniteNumber(value, path) {
+    if (!Number.isFinite(value)) throw new TypeError(`${path} は有限数である必要があります`);
+  }
+
+  function assertWebMcpRevision(value, path) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new TypeError(`${path} は0以上の安全な整数である必要があります`);
+    }
+  }
+
+  function assertCurrentWorkspaceRevision(expectedRevision) {
+    if (expectedRevision !== workspaceRevision) {
+      throw new Error(`作業状態が更新されています。get_annotations で最新の revision (${workspaceRevision}) を取得して再実行してください`);
+    }
+  }
+
+  function assertWebMcpPoints(points, path, requiredLength, exactLength) {
+    if (!Array.isArray(points)) throw new TypeError(`${path}.points は数値配列である必要があります`);
+    if (exactLength && points.length !== requiredLength) {
+      throw new TypeError(`${path}.points は正確に${requiredLength}要素である必要があります`);
+    }
+    if (!exactLength && points.length < requiredLength) {
+      throw new TypeError(`${path}.points は${requiredLength}要素以上である必要があります`);
+    }
+    if (points.length % 2 !== 0) throw new TypeError(`${path}.points は偶数要素である必要があります`);
+    for (let index = 0; index < points.length; index++) {
+      assertWebMcpFiniteNumber(points[index], `${path}.points[${index}]`);
+    }
+  }
+
+  function throwIfWebMcpExecutionAborted(signal) {
+    if (!signal || !signal.aborted) return;
+    if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
+    throw new DOMException('WebMCP ツールの実行がキャンセルされました', 'AbortError');
+  }
+
+  async function registerAnnoForgeWebMcpTools() {
+    if (typeof document.modelContext?.registerTool !== 'function') return;
+
+    const urlImageInputSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expectedRevision', 'url'],
+      properties: {
+        expectedRevision: {
+          type: 'integer',
+          minimum: 0
+        },
+        url: {
+          type: 'string',
+          minLength: 1
+        }
+      }
+    };
+
+    const dataUrlImageInputSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expectedRevision', 'dataUrl'],
+      properties: {
+        expectedRevision: {
+          type: 'integer',
+          minimum: 0
+        },
+        dataUrl: {
+          type: 'string',
+          minLength: 1,
+          maxLength: WEBMCP_MAX_DATA_URL_LENGTH,
+          pattern: '^data:image/(png|jpeg|webp);base64,'
+        }
+      }
+    };
+
+    const previewInputSchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxDimension: {
+          type: 'integer',
+          minimum: WEBMCP_PREVIEW_MIN_DIMENSION,
+          maximum: WEBMCP_PREVIEW_MAX_DIMENSION,
+          default: WEBMCP_PREVIEW_DEFAULT_MAX_DIMENSION
+        }
+      }
+    };
+
+    const replaceAnnotationsInputSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expectedRevision', 'draw'],
+      properties: {
+        expectedRevision: {
+          type: 'integer',
+          minimum: 0
+        },
+        draw: {
+          type: 'array',
+          items: {
+            oneOf: [
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['shape', 'x', 'y', 'width', 'height', 'color', 'thickness'],
+                properties: {
+                  shape: { const: 'rectangle' },
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  width: { type: 'number', minimum: 5 },
+                  height: { type: 'number', minimum: 5 },
+                  color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
+                  thickness: { type: 'number', exclusiveMinimum: 0 }
+                }
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['shape', 'x1', 'y1', 'x2', 'y2', 'color', 'thickness'],
+                properties: {
+                  shape: { const: 'line' },
+                  x1: { type: 'number' },
+                  y1: { type: 'number' },
+                  x2: { type: 'number' },
+                  y2: { type: 'number' },
+                  color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
+                  thickness: { type: 'number', exclusiveMinimum: 0 }
+                }
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['shape', 'points', 'color', 'thickness'],
+                properties: {
+                  shape: { const: 'polygon' },
+                  points: {
+                    type: 'array',
+                    minItems: 6,
+                    items: { type: 'number' }
+                  },
+                  color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
+                  thickness: { type: 'number', exclusiveMinimum: 0 }
+                }
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['shape', 'points', 'color', 'thickness'],
+                properties: {
+                  shape: { const: 'parallelogram' },
+                  points: {
+                    type: 'array',
+                    minItems: 8,
+                    maxItems: 8,
+                    items: { type: 'number' }
+                  },
+                  color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
+                  thickness: { type: 'number', exclusiveMinimum: 0 }
+                }
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['shape', 'x', 'y', 'radius', 'color', 'thickness'],
+                properties: {
+                  shape: { const: 'circle' },
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  radius: { type: 'number', minimum: 3 },
+                  color: { type: 'string', pattern: '^#?[0-9A-Fa-f]{6}$' },
+                  thickness: { type: 'number', exclusiveMinimum: 0 }
+                }
+              }
+            ]
+          }
+        }
+      }
+    };
+
+    const downloadInputSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expectedRevision'],
+      properties: {
+        expectedRevision: {
+          type: 'integer',
+          minimum: 0
+        }
+      }
+    };
+
+    const exportImageInputSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expectedRevision', 'delivery'],
+      properties: {
+        expectedRevision: {
+          type: 'integer',
+          minimum: 0
+        },
+        delivery: {
+          type: 'string',
+          enum: ['data_url', 'download']
+        }
+      }
+    };
+
+    try {
+      await document.modelContext.registerTool({
+        name: 'open_image_from_url',
+        title: 'URLから画像を開く',
+        description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、CORSで取得可能なHTTPS URLまたは同一オリジンのloopback URLから開きます。成功時は既存アノテーションを消去します。',
+        inputSchema: urlImageInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const openInput = validateWebMcpUrlImageInput(input);
+          return openWebMcpImageFromUrl(openInput, signal);
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'open_image_from_data_url',
+        title: 'Data URLから画像を開く',
+        description: '現在の版が expectedRevision と一致する場合だけ、会話側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。成功時は既存アノテーションを消去します。',
+        inputSchema: dataUrlImageInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const openInput = validateWebMcpDataUrlImageInput(input);
+          return openWebMcpImageFromDataUrl(openInput, signal);
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'get_annotations',
+        title: '現在のアノテーションを取得',
+        description: '現在の AnnoForge ページにある全アノテーションを、元画像座標の draw 配列として読み取ります。画像データとファイル名は返しません。',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false
+        },
+        annotations: {
+          readOnlyHint: true,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          validateWebMcpEmptyInput(input);
+          const annotationDocument = getAnnotationDocument();
+          return {
+            revision: workspaceRevision,
+            draw: annotationDocument.draw,
+            annotationCount: annotationDocument.draw.length,
+            image: {
+              loaded: !!loadedImage,
+              originalWidth: loadedImage ? loadedImage.naturalWidth : null,
+              originalHeight: loadedImage ? loadedImage.naturalHeight : null
+            }
+          };
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'get_image_preview',
+        title: '現在の画像プレビューを取得',
+        description: '元画像の範囲に確定済みアノテーションを重ね、縦横比を維持したPNG Data URLとして返します。最大辺は既定1024px、指定可能範囲は64pxから2048pxで、元画像より拡大しません。表示のパン、ズーム、選択状態は結果へ影響しません。',
+        inputSchema: previewInputSchema,
+        annotations: {
+          readOnlyHint: true,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const previewInput = validateWebMcpPreviewInput(input);
+          if (!loadedImage) throw new Error('プレビューを取得する前に画像を開いてください');
+          return createWebMcpImagePreview(previewInput.maxDimension, signal);
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'replace_annotations',
+        title: 'アノテーションを置換',
+        description: '現在の版が expectedRevision と一致する場合だけ、全アノテーションを指定された AnnoForge draw 配列で置き換えます。空配列は全消去です。全項目の検証後にだけ変更します。',
+        inputSchema: replaceAnnotationsInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const replaceInput = validateWebMcpReplaceInput(input);
+          assertCurrentWorkspaceRevision(replaceInput.expectedRevision);
+          throwIfWebMcpExecutionAborted(signal);
+          importAnnotations({ draw: replaceInput.draw });
+          return {
+            replaced: true,
+            annotationCount: shapes.length,
+            revision: workspaceRevision
+          };
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'start_annotations_json_download',
+        title: 'アノテーションJSONの保存を開始',
+        description: '現在の版が expectedRevision と一致し、アノテーションがある場合だけ、現在の draw をJSONとして保存する既存のダウンロード処理を開始します。',
+        inputSchema: downloadInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const downloadInput = validateWebMcpDownloadInput(input);
+          assertCurrentWorkspaceRevision(downloadInput.expectedRevision);
+          if (shapes.length === 0) throw new Error('アノテーションJSONを保存する前にアノテーションを作成してください');
+          throwIfWebMcpExecutionAborted(signal);
+          downloadJsonFile();
+          return {
+            started: true,
+            revision: workspaceRevision,
+            annotationCount: shapes.length
+          };
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'export_annotated_image',
+        title: '注釈付き画像を出力',
+        description: '現在の版が expectedRevision と一致する場合だけ、元画像と確定済みアノテーションを元画像と同じ寸法のPNGとして出力します。data_urlはエージェントへ画像を返し、downloadは人向けダウンロードを開始します。表示のパン、ズーム、選択状態は結果へ影響しません。',
+        inputSchema: exportImageInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          untrustedContentHint: false
+        },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const exportInput = validateWebMcpExportInput(input);
+          assertCurrentWorkspaceRevision(exportInput.expectedRevision);
+          if (!loadedImage) throw new Error('注釈付き画像を出力する前に画像を開いてください');
+          throwIfWebMcpExecutionAborted(signal);
+          if (exportInput.delivery === 'download') {
+            const downloadResult = await startAnnotatedImageDownload(signal, exportInput.expectedRevision);
+            return {
+              delivered: 'download',
+              started: true,
+              revision: downloadResult.revision,
+              annotationCount: downloadResult.annotationCount
+            };
+          }
+
+          const imageResult = await createAnnotatedImageResult(signal);
+          return {
+            delivered: 'data_url',
+            revision: imageResult.revision,
+            annotationCount: imageResult.annotationCount,
+            mimeType: 'image/png',
+            width: imageResult.width,
+            height: imageResult.height,
+            dataUrl: imageResult.dataUrl
+          };
+        }
+      });
+    } catch (error) {
+      console.error('WebMCP ツールの登録に失敗しました:', error);
+    }
   }
 
   // rgb() → #rrggbb
@@ -1083,7 +1781,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // クリップボード
   function copyAllAnnotations() {
     if (shapes.length === 0) { showNotification('コピーするアノテーションがありません', 'error'); return; }
-    const jsonString = JSON.stringify({ draw: shapes.map(shapeToJson) }, null, 2);
+    const jsonString = JSON.stringify(getAnnotationDocument(), null, 2);
     copyToClipboard(jsonString); showNotification(`${shapes.length}個のアノテーションをコピーしました`);
   }
 
@@ -1095,27 +1793,229 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function downloadJsonFile() {
     if (shapes.length === 0) { showNotification('ダウンロードするアノテーションがありません', 'error'); return; }
-    const data = { draw: shapes.map(shapeToJson) };
+    const data = getAnnotationDocument();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const fname = makeFileName(loadedImageName, 'annotations.json', '-annotations.json');
     triggerDownload(blob, fname);
   }
 
-  function downloadAnnotatedImage() {
+  async function downloadAnnotatedImage() {
     if (!loadedImage) { showNotification('先に画像を読み込んでください', 'error'); return; }
-    // 一時的にガイドとトランスフォーマを非表示
-    const prevGuidesVisible = guidesLayer.visible();
-    guidesLayer.visible(false);
-    const hadTransformer = !!transformer;
-    let prevTransformerVisible = false;
-    if (transformer) { prevTransformerVisible = transformer.visible(); transformer.visible(false); }
-    const dataURL = stage.toDataURL({ mimeType: 'image/png' });
-    // 元の状態に戻す
-    if (transformer) transformer.visible(prevTransformerVisible);
-    guidesLayer.visible(prevGuidesVisible);
-    // ダウンロード
+    try {
+      await startAnnotatedImageDownload();
+    } catch (error) {
+      console.error('注釈付き画像の保存に失敗しました:', error);
+      showNotification(error instanceof Error ? error.message : '注釈付き画像を保存できません', 'error');
+    }
+  }
+
+  // 表示用ステージではなく、元画像座標の確定モデルから出力専用シーンを生成する。
+  // これにより、パン、ズーム、画面サイズ、ドラフト、選択表示は出力へ混入しない。
+  function createAnnotatedImageCanvas({ maxDimension } = {}) {
+    if (!loadedImage) throw new Error('注釈付き画像を生成する前に画像を開いてください');
+
+    const originalWidth = loadedImage.naturalWidth;
+    const originalHeight = loadedImage.naturalHeight;
+    if (!Number.isSafeInteger(originalWidth) || originalWidth <= 0 || !Number.isSafeInteger(originalHeight) || originalHeight <= 0) {
+      throw new Error('元画像の寸法を取得できません');
+    }
+
+    const outputScale = maxDimension === undefined
+      ? 1
+      : Math.min(1, maxDimension / Math.max(originalWidth, originalHeight));
+    const width = Math.max(1, Math.round(originalWidth * outputScale));
+    const height = Math.max(1, Math.round(originalHeight * outputScale));
+    const container = document.createElement('div');
+    let renderStage = null;
+
+    try {
+      renderStage = new Konva.Stage({ container, width, height });
+      const renderLayer = new Konva.Layer({ listening: false });
+      const content = new Konva.Group({
+        scaleX: width / originalWidth,
+        scaleY: height / originalHeight,
+        listening: false
+      });
+      content.add(new Konva.Image({
+        image: loadedImage,
+        x: 0,
+        y: 0,
+        width: originalWidth,
+        height: originalHeight,
+        listening: false
+      }));
+      for (const model of shapes) {
+        content.add(createAnnotatedImageShapeNode(model));
+      }
+      renderLayer.add(content);
+      renderStage.add(renderLayer);
+      renderLayer.draw();
+
+      const canvas = renderStage.toCanvas({
+        x: 0,
+        y: 0,
+        width,
+        height,
+        pixelRatio: 1
+      });
+      if (!canvas || canvas.width !== width || canvas.height !== height) {
+        throw new Error('要求した寸法のキャンバスを生成できません');
+      }
+      return { canvas, width, height };
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
+      throw new Error(`注釈付き画像を生成できません${detail}`);
+    } finally {
+      if (renderStage) renderStage.destroy();
+    }
+  }
+
+  function createAnnotatedImageShapeNode(model) {
+    const stroke = model.colorHex || '#000000';
+    const strokeWidth = model.thickness;
+    const common = { stroke, strokeWidth, listening: false };
+
+    if (model.type === 'rectangle') {
+      return new Konva.Rect({
+        x: model.x,
+        y: model.y,
+        width: model.width,
+        height: model.height,
+        rotation: getFinalizedShapeRotation(model),
+        ...common
+      });
+    }
+    if (model.type === 'line') {
+      return new Konva.Line({
+        points: [model.x1, model.y1, model.x2, model.y2],
+        ...common
+      });
+    }
+    if (model.type === 'polygon' || model.type === 'parallelogram') {
+      return new Konva.Line({
+        points: model.points.slice(),
+        closed: true,
+        ...common
+      });
+    }
+    if (model.type === 'circle') {
+      return new Konva.Circle({
+        x: model.x,
+        y: model.y,
+        radius: model.radius,
+        rotation: getFinalizedShapeRotation(model),
+        ...common
+      });
+    }
+    throw new Error(`未対応のアノテーション種別です: ${model.type}`);
+  }
+
+  // 回転角は既存JSONの対象外なので、矩形と円だけ確定済み表示ノードから引き継ぐ。
+  function getFinalizedShapeRotation(model) {
+    if (model.type !== 'rectangle' && model.type !== 'circle') return 0;
+    const node = annotationsLayer.findOne((candidate) => candidate.getAttr('shapeId') === model.id);
+    const rotation = node ? node.rotation() : 0;
+    return Number.isFinite(rotation) ? rotation : 0;
+  }
+
+  function createPngDataUrl(canvas, failureMessage) {
+    let dataUrl;
+    try {
+      dataUrl = canvas.toDataURL('image/png');
+    } catch (error) {
+      console.error(failureMessage, error);
+      throw new Error(failureMessage);
+    }
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
+      throw new Error(failureMessage);
+    }
+    return dataUrl;
+  }
+
+  function createPngBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob((blob) => {
+          if (!blob || blob.size === 0) {
+            reject(new Error('注釈付き画像をPNGとして保存できません'));
+            return;
+          }
+          resolve(blob);
+        }, 'image/png');
+      } catch (error) {
+        console.error('注釈付き画像のPNG変換に失敗しました:', error);
+        reject(new Error('注釈付き画像をPNGとして保存できません'));
+      }
+    });
+  }
+
+  function assertDecodedImageSize(image, width, height, label) {
+    if (image.naturalWidth !== width || image.naturalHeight !== height) {
+      throw new Error(`${label}を要求した寸法で生成できません`);
+    }
+  }
+
+  async function createAnnotatedImageResult(signal) {
+    const revision = workspaceRevision;
+    const annotationCount = shapes.length;
+    throwIfWebMcpExecutionAborted(signal);
+    const { canvas, width, height } = createAnnotatedImageCanvas();
+    const dataUrl = createPngDataUrl(canvas, '注釈付き画像をPNGとして生成できません');
+    if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
+      throw new RangeError('注釈付き画像のData URLが12 MiBを超えています。deliveryをdownloadにして保存してください');
+    }
+    const image = await decodeImageSource(dataUrl, signal);
+    assertDecodedImageSize(image, width, height, '注釈付き画像');
+    throwIfWebMcpExecutionAborted(signal);
+    if (workspaceRevision !== revision) {
+      throw new Error('画像の生成中に作業状態が更新されました。最新のrevisionで再実行してください');
+    }
+    return {
+      dataUrl,
+      width,
+      height,
+      revision,
+      annotationCount
+    };
+  }
+
+  async function createWebMcpImagePreview(maxDimension, signal) {
+    const revision = workspaceRevision;
+    const annotationCount = shapes.length;
+    throwIfWebMcpExecutionAborted(signal);
+    const { canvas, width, height } = createAnnotatedImageCanvas({ maxDimension });
+    const dataUrl = createPngDataUrl(canvas, '画像プレビューをPNGとして生成できません');
+    if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
+      throw new RangeError('画像プレビューのData URLが12 MiBを超えています。maxDimensionを小さくしてください');
+    }
+    const image = await decodeImageSource(dataUrl, signal);
+    assertDecodedImageSize(image, width, height, '画像プレビュー');
+    throwIfWebMcpExecutionAborted(signal);
+    if (workspaceRevision !== revision) {
+      throw new Error('プレビューの生成中に作業状態が更新されました。再実行してください');
+    }
+    return {
+      revision,
+      annotationCount,
+      mimeType: 'image/png',
+      width,
+      height,
+      dataUrl
+    };
+  }
+
+  async function startAnnotatedImageDownload(signal, expectedRevision) {
+    if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
+    const revision = workspaceRevision;
+    const annotationCount = shapes.length;
+    throwIfWebMcpExecutionAborted(signal);
+    const { canvas } = createAnnotatedImageCanvas();
+    const blob = await createPngBlob(canvas);
+    throwIfWebMcpExecutionAborted(signal);
+    if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
     const fname = makeFileName(loadedImageName, 'annotated.png', '-annotated.png');
-    dataUrlToDownload(dataURL, fname);
+    triggerDownload(blob, fname);
+    return { revision, annotationCount };
   }
 
   function makeFileName(baseName, fallback, suffix) {
@@ -1132,17 +2032,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
   }
 
-  function dataUrlToDownload(dataURL, filename) {
-    const a = document.createElement('a');
-    a.href = dataURL; a.download = filename; document.body.appendChild(a); a.click();
-    setTimeout(() => { document.body.removeChild(a); }, 0);
-  }
-
   // JSON読み込み（モーダルで実施）
 
   function importAnnotations(obj) {
     if (!obj || !Array.isArray(obj.draw)) { showNotification('不正なJSON形式です（draw配列が必要）', 'error'); return; }
-    clearAll();
+    clearAll({ advanceRevision: false });
     let ok = 0, skip = 0;
     for (const it of obj.draw) {
       const shape = (it.shape || '').toLowerCase();
@@ -1152,14 +2046,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (shape === 'rectangle') {
         if (!isFinite(it.x)||!isFinite(it.y)||!isFinite(it.width)||!isFinite(it.height)) { skip++; continue; }
         const model = { id: idSeq++, type: 'rectangle', colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), width: Math.round(it.width), height: Math.round(it.height) };
-        const node = new Konva.Rect({ x: model.x * canvasScale, y: model.y * canvasScale, width: model.width * canvasScale, height: model.height * canvasScale, ...commonStrokeProps(thickness), draggable: true });
+        const node = new Konva.Rect({ x: model.x * canvasScale, y: model.y * canvasScale, width: model.width * canvasScale, height: model.height * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: true });
         node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else if (shape === 'line') {
         if (!isFinite(it.x1)||!isFinite(it.y1)||!isFinite(it.x2)||!isFinite(it.y2)) { skip++; continue; }
         const model = { id: idSeq++, type: 'line', colorHex, thickness, x1: Math.round(it.x1), y1: Math.round(it.y1), x2: Math.round(it.x2), y2: Math.round(it.y2) };
         const pts = [model.x1 * canvasScale, model.y1 * canvasScale, model.x2 * canvasScale, model.y2 * canvasScale];
-        const node = new Konva.Line({ points: pts, ...commonStrokeProps(thickness), draggable: true, hitStrokeWidth: Math.max(8, thickness) });
+        const node = new Konva.Line({ points: pts, ...commonStrokeProps(thickness, colorHex), draggable: true, hitStrokeWidth: Math.max(8, thickness) });
         node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else if (shape === 'polygon' || shape === 'parallelogram') {
@@ -1167,13 +2061,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const pts = it.points.map(v => Math.round(v));
         const model = { id: idSeq++, type: shape, colorHex, thickness, points: pts };
         const scaled = pts.map(v => v * canvasScale);
-        const node = new Konva.Line({ points: scaled, closed: shape !== 'polygon', ...commonStrokeProps(thickness), draggable: true });
+        const node = new Konva.Line({ points: scaled, closed: true, ...commonStrokeProps(thickness, colorHex), draggable: true });
         node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
         shapes.push(model); ok++;
       } else if (shape === 'circle') {
         if (!isFinite(it.x)||!isFinite(it.y)||!isFinite(it.radius)) { skip++; continue; }
         const model = { id: idSeq++, type: 'circle', colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), radius: Math.round(it.radius) };
-        const node = new Konva.Circle({ x: model.x * canvasScale, y: model.y * canvasScale, radius: model.radius * canvasScale, ...commonStrokeProps(thickness), draggable: true });
+        const node = new Konva.Circle({ x: model.x * canvasScale, y: model.y * canvasScale, radius: model.radius * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: true });
         node.strokeScaleEnabled(false);
         node.setAttr('shapeId', model.id); attachCommonNodeHandlers(node); annotationsLayer.add(node);
         shapes.push(model); ok++;
@@ -1181,6 +2075,7 @@ document.addEventListener('DOMContentLoaded', () => {
         skip++;
       }
     }
+    advanceWorkspaceRevision();
     annotationsLayer.draw();
     updateAnnotationList();
     showNotification(`${ok}件読み込み、${skip}件スキップ` , skip ? 'error' : 'success');
@@ -1213,9 +2108,17 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 全消去
-  function clearAll() {
+  function clearAll({ advanceRevision = true } = {}) {
+    const hadAnnotations = shapes.length > 0;
+    cancelDraft();
+    clearSelection();
     shapes.splice(0, shapes.length);
     annotationsLayer.destroyChildren(); annotationsLayer.draw();
+    transformer = null;
+    selectedShapeId = null;
+    if (advanceRevision && hadAnnotations) advanceWorkspaceRevision();
     updateAnnotationList();
   }
+
+  registerAnnoForgeWebMcpTools();
 });

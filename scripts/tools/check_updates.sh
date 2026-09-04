@@ -20,6 +20,10 @@ targets+=(
 )
 
 targets+=(
+  "static_web_server|github_release|static-web-server/static-web-server|CMD:${ROOT_DIR}/tools/web/static-web-server --version|Version:[[:space:]]+([0-9.]+)|bash scripts/tools/web/start-local-web.sh を実行し、起動時の更新確認に従う|docs/VERSIONS.md#static-web-server|https://github.com/static-web-server/static-web-server/releases|"
+)
+
+targets+=(
   "terraform_cli|hashicorp_release|terraform|CMD:terraform version|Terraform v([0-9.]+)|docs/VERSIONS.md#terraform-cli を参照|docs/VERSIONS.md#terraform-cli|https://releases.hashicorp.com/terraform/|"
 )
 
@@ -192,6 +196,18 @@ fetch_latest_version() {
           | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
           | sort_by(split(".") | map(tonumber))
           | last')" || return 1
+      return 0
+      ;;
+    github_release)
+      FETCH_ENDPOINT="https://api.github.com/repos/${target}/releases/latest"
+      if ! data=$(http_get "$FETCH_ENDPOINT" "application/vnd.github+json"); then
+        return 1
+      fi
+      LATEST_VERSION="$(printf '%s' "$data" | jq -r '.tag_name')" || return 1
+      if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
+        FETCH_NOTE="failed to parse GitHub latest release"
+        return 1
+      fi
       return 0
       ;;
     hashicorp_provider)
