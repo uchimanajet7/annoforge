@@ -111,6 +111,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const WEBMCP_PREVIEW_MIN_DIMENSION = 64;
   const WEBMCP_PREVIEW_MAX_DIMENSION = 2048;
   const WEBMCP_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+  const DOWNLOAD_OBJECT_URL_RELEASE_DELAY_MS = 1000;
+  const DOWNLOAD_REQUESTED_MESSAGE = 'ブラウザーにダウンロードを要求しました。完了状態はダウンロード一覧で確認してください';
 
   function advanceWorkspaceRevision() {
     workspaceRevision += 1;
@@ -250,8 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (colorPicker) {
       colorPicker.value = currentColor;
       colorPicker.addEventListener('input', (e) => {
-        currentColor = e.target.value;
-        highlightActiveColor();
+        applyColorChoice(e.target.value);
       });
     }
 
@@ -388,25 +389,72 @@ document.addEventListener('DOMContentLoaded', () => {
     swatchesEl.innerHTML = '';
     paletteColors.forEach(hex => {
       const sw = document.createElement('button');
+      sw.type = 'button';
       sw.className = 'color-swatch';
+      sw.dataset.color = normalizeHex(hex);
       sw.title = hex;
       sw.setAttribute('aria-label', `色 ${hex}`);
+      sw.setAttribute('aria-pressed', 'false');
       sw.style.backgroundColor = hex;
-      sw.addEventListener('click', () => {
-        currentColor = hex;
-        if (colorPicker) colorPicker.value = hex;
-        highlightActiveColor();
-      });
+      sw.addEventListener('click', () => applyColorChoice(hex));
       swatchesEl.appendChild(sw);
     });
-    highlightActiveColor();
+    syncColorControls();
   }
-  function highlightActiveColor() {
-    if (!swatchesEl) return;
-    Array.from(swatchesEl.children).forEach(el => {
-      const isActive = rgbToHex(el.style.backgroundColor) === currentColor.toLowerCase();
-      if (isActive) el.classList.add('active'); else el.classList.remove('active');
-    });
+
+  function getSelectedShape() {
+    if (selectedShapeId === null) return null;
+    return shapes.find(shape => shape.id === selectedShapeId) || null;
+  }
+
+  function getColorControlTargetLabel() {
+    const selectedShape = getSelectedShape();
+    if (!selectedShape) return '新規アノテーションの線色';
+    const index = shapes.findIndex(shape => shape.id === selectedShape.id);
+    return `${shapeTitle(selectedShape, index)}の線色`;
+  }
+
+  function syncColorControls() {
+    const selectedShape = getSelectedShape();
+    const activeColor = normalizeHex(selectedShape ? selectedShape.colorHex : currentColor) || '#FF0000';
+    const targetLabel = getColorControlTargetLabel();
+    if (swatchesEl) {
+      swatchesEl.setAttribute('aria-label', targetLabel);
+      Array.from(swatchesEl.children).forEach(swatch => {
+        const swatchColor = normalizeHex(swatch.dataset.color);
+        const isActive = swatchColor === activeColor;
+        swatch.classList.toggle('active', isActive);
+        swatch.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        swatch.setAttribute('aria-label', `${targetLabel}: ${swatchColor}`);
+      });
+    }
+    if (colorPicker) {
+      colorPicker.value = activeColor.toLowerCase();
+      colorPicker.setAttribute('aria-label', `${targetLabel}（任意色）`);
+    }
+  }
+
+  function applyColorChoice(value) {
+    const colorHex = normalizeHex(value);
+    if (!colorHex) {
+      syncColorControls();
+      return false;
+    }
+
+    currentColor = colorHex;
+    const selectedShape = getSelectedShape();
+    if (!selectedShape || normalizeHex(selectedShape.colorHex) === colorHex) {
+      syncColorControls();
+      return false;
+    }
+
+    selectedShape.colorHex = colorHex;
+    const node = findAnnotationNodeById(selectedShape.id);
+    if (node) node.stroke(colorHex);
+    advanceWorkspaceRevision();
+    annotationsLayer.batchDraw();
+    updateAnnotationList();
+    return true;
   }
 
   // 空状態描画
@@ -615,6 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
     removeAnchors();
     restoreAnnotationNodeOrder();
     syncAnnotationListSelection();
+    syncColorControls();
     annotationsLayer.draw();
   }
 
@@ -670,6 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
       drawAnchorsForModel(model, node);
     }
     syncAnnotationListSelection();
+    syncColorControls();
     annotationsLayer.draw();
   }
 
@@ -1139,6 +1189,7 @@ document.addEventListener('DOMContentLoaded', () => {
       annotationList.appendChild(msg);
     }
     updateJsonDisplay();
+    syncColorControls();
   }
 
   function selectAnnotationById(id) {
@@ -1764,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'start_annotations_json_download',
         title: 'アノテーションJSONの保存を開始',
-        description: '現在の版が expectedRevision と一致し、アノテーションがある場合だけ、現在の draw をJSONとして保存する既存のダウンロード処理を開始します。',
+        description: '現在の版が expectedRevision と一致し、アノテーションがある場合だけ、現在の draw のJSONを生成してブラウザーへダウンロードを要求します。結果は要求送信までを示し、ブラウザーでの保存完了は確認しません。',
         inputSchema: downloadInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1774,21 +1825,15 @@ document.addEventListener('DOMContentLoaded', () => {
           throwIfWebMcpExecutionAborted(signal);
           const downloadInput = validateWebMcpDownloadInput(input);
           assertCurrentWorkspaceRevision(downloadInput.expectedRevision);
-          if (shapes.length === 0) throw new Error('アノテーションJSONを保存する前にアノテーションを作成してください');
           throwIfWebMcpExecutionAborted(signal);
-          downloadJsonFile();
-          return {
-            started: true,
-            revision: workspaceRevision,
-            annotationCount: shapes.length
-          };
+          return requestAnnotationsJsonDownload(downloadInput.expectedRevision, signal);
         }
       });
 
       await document.modelContext.registerTool({
         name: 'export_annotated_image',
         title: '注釈付き画像を出力',
-        description: '現在の版が expectedRevision と一致する場合だけ、元画像と確定済みアノテーションを元画像と同じ寸法のPNGとして出力します。data_urlはエージェントへ画像を返し、downloadは人向けダウンロードを開始します。表示のパン、ズーム、選択状態は結果へ影響しません。',
+        description: '現在の版が expectedRevision と一致する場合だけ、元画像と確定済みアノテーションを元画像と同じ寸法のPNGとして出力します。data_urlはPNGデータをツール呼び出し元へ返しますが、会話への表示や添付は保証しません。downloadはブラウザーへダウンロードを要求しますが、保存完了は確認しません。表示のパン、ズーム、選択状態は結果へ影響しません。',
         inputSchema: exportImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1801,18 +1846,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!loadedImage) throw new Error('注釈付き画像を出力する前に画像を開いてください');
           throwIfWebMcpExecutionAborted(signal);
           if (exportInput.delivery === 'download') {
-            const downloadResult = await startAnnotatedImageDownload(signal, exportInput.expectedRevision);
-            return {
-              delivered: 'download',
-              started: true,
-              revision: downloadResult.revision,
-              annotationCount: downloadResult.annotationCount
-            };
+            return requestAnnotatedImageDownload(signal, exportInput.expectedRevision);
           }
 
           const imageResult = await createAnnotatedImageResult(signal);
           return {
-            delivered: 'data_url',
+            outcome: 'data_returned',
+            delivery: 'data_url',
             revision: imageResult.revision,
             annotationCount: imageResult.annotationCount,
             mimeType: 'image/png',
@@ -1825,15 +1865,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('WebMCP ツールの登録に失敗しました:', error);
     }
-  }
-
-  // rgb() → #rrggbb
-  function rgbToHex(rgb) {
-    if (!rgb) return '';
-    const m = rgb.match(/rgb\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)/i);
-    if (!m) return rgb.toLowerCase();
-    const toHex = (n) => ('0' + parseInt(n, 10).toString(16)).slice(-2);
-    return '#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3]);
   }
 
   // クリップボード
@@ -1850,17 +1881,20 @@ document.addEventListener('DOMContentLoaded', () => {
   if (downloadImageBtn) downloadImageBtn.addEventListener('click', downloadAnnotatedImage);
 
   function downloadJsonFile() {
-    if (shapes.length === 0) { showNotification('ダウンロードするアノテーションがありません', 'error'); return; }
-    const data = getAnnotationDocument();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const fname = makeFileName(loadedImageName, 'annotations.json', '-annotations.json');
-    triggerDownload(blob, fname);
+    try {
+      requestAnnotationsJsonDownload();
+      showNotification(DOWNLOAD_REQUESTED_MESSAGE);
+    } catch (error) {
+      console.error('アノテーションJSONの保存に失敗しました:', error);
+      showNotification(error instanceof Error ? error.message : 'アノテーションJSONを保存できません', 'error');
+    }
   }
 
   async function downloadAnnotatedImage() {
     if (!loadedImage) { showNotification('先に画像を読み込んでください', 'error'); return; }
     try {
-      await startAnnotatedImageDownload();
+      await requestAnnotatedImageDownload();
+      showNotification(DOWNLOAD_REQUESTED_MESSAGE);
     } catch (error) {
       console.error('注釈付き画像の保存に失敗しました:', error);
       showNotification(error instanceof Error ? error.message : '注釈付き画像を保存できません', 'error');
@@ -2007,6 +2041,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function createAnnotationsJsonArtifact() {
+    if (shapes.length === 0) {
+      throw new Error('アノテーションJSONを保存する前にアノテーションを作成してください');
+    }
+    const revision = workspaceRevision;
+    const annotationCount = shapes.length;
+    const json = JSON.stringify(getAnnotationDocument(), null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    if (blob.size === 0) throw new Error('アノテーションJSONを生成できません');
+    return {
+      blob,
+      filename: makeFileName(loadedImageName, 'annotations.json', '-annotations.json'),
+      mimeType: 'application/json',
+      byteLength: blob.size,
+      revision,
+      annotationCount
+    };
+  }
+
+  function requestAnnotationsJsonDownload(expectedRevision, signal) {
+    if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
+    throwIfWebMcpExecutionAborted(signal);
+    const artifact = createAnnotationsJsonArtifact();
+    throwIfWebMcpExecutionAborted(signal);
+    if (workspaceRevision !== artifact.revision) {
+      throw new Error('JSONの生成中に作業状態が更新されました。最新のrevisionで再実行してください');
+    }
+    if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
+    return requestBrowserDownload(artifact);
+  }
+
   function assertDecodedImageSize(image, width, height, label) {
     if (image.naturalWidth !== width || image.naturalHeight !== height) {
       throw new Error(`${label}を要求した寸法で生成できません`);
@@ -2062,18 +2127,34 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  async function startAnnotatedImageDownload(signal, expectedRevision) {
+  async function createAnnotatedImageArtifact(signal, expectedRevision) {
     if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
     const revision = workspaceRevision;
     const annotationCount = shapes.length;
     throwIfWebMcpExecutionAborted(signal);
-    const { canvas } = createAnnotatedImageCanvas();
+    const { canvas, width, height } = createAnnotatedImageCanvas();
     const blob = await createPngBlob(canvas);
     throwIfWebMcpExecutionAborted(signal);
+    if (workspaceRevision !== revision) {
+      throw new Error('画像の生成中に作業状態が更新されました。最新のrevisionで再実行してください');
+    }
     if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
-    const fname = makeFileName(loadedImageName, 'annotated.png', '-annotated.png');
-    triggerDownload(blob, fname);
-    return { revision, annotationCount };
+    return {
+      blob,
+      filename: makeFileName(loadedImageName, 'annotated.png', '-annotated.png'),
+      mimeType: 'image/png',
+      byteLength: blob.size,
+      width,
+      height,
+      revision,
+      annotationCount
+    };
+  }
+
+  async function requestAnnotatedImageDownload(signal, expectedRevision) {
+    const artifact = await createAnnotatedImageArtifact(signal, expectedRevision);
+    throwIfWebMcpExecutionAborted(signal);
+    return requestBrowserDownload(artifact);
   }
 
   function makeFileName(baseName, fallback, suffix) {
@@ -2083,11 +2164,41 @@ document.addEventListener('DOMContentLoaded', () => {
     return stem + suffix;
   }
 
-  function triggerDownload(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; document.body.appendChild(a); a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+  function requestBrowserDownload(artifact) {
+    let url = null;
+    let anchor = null;
+    try {
+      url = URL.createObjectURL(artifact.blob);
+      anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = artifact.filename;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+    } catch (error) {
+      if (anchor) anchor.remove();
+      if (url) URL.revokeObjectURL(url);
+      throw new Error('ブラウザーへダウンロード要求を送信できません');
+    }
+
+    setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, DOWNLOAD_OBJECT_URL_RELEASE_DELAY_MS);
+
+    const result = {
+      outcome: 'download_requested',
+      requestDispatched: true,
+      completionVerified: false,
+      filename: artifact.filename,
+      mimeType: artifact.mimeType,
+      byteLength: artifact.byteLength,
+      revision: artifact.revision,
+      annotationCount: artifact.annotationCount
+    };
+    if (artifact.width !== undefined) result.width = artifact.width;
+    if (artifact.height !== undefined) result.height = artifact.height;
+    return result;
   }
 
   // JSON読み込み（モーダルで実施）

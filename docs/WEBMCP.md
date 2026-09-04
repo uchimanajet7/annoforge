@@ -1,6 +1,6 @@
 # AnnoForge WebMCP 仕様
 
-- 仕様バージョン: 3.2
+- 仕様バージョン: 3.3
 - 人向け機能仕様: [SPEC.md](./SPEC.md)
 
 ## 1. 適用範囲
@@ -22,7 +22,7 @@ WebMCP ツールと人向け UI は、同じブラウザーセッションの画
 | `get_annotations` | 現在のアノテーションを取得 | なし |
 | `get_image_preview` | 現在の画像プレビューを取得 | なし |
 | `replace_annotations` | アノテーションを置換 | あり |
-| `start_annotations_json_download` | アノテーションJSONの保存を開始 | ダウンロード開始 |
+| `start_annotations_json_download` | アノテーションJSONの保存を開始 | ダウンロード要求 |
 | `export_annotated_image` | 注釈付き画像を出力 | `delivery` による |
 
 `document.modelContext.registerTool()` が利用できない場合、ツールを登録しない。この場合も人向け UI は利用でき、WebMCP 用の UI やエラーは表示しない。
@@ -36,8 +36,10 @@ WebMCP ツールと人向け UI は、同じブラウザーセッションの画
 次の操作が成功するたびに `revision` を1増加する。
 
 - 画像の読み込み
-- アノテーションの作成、移動、変形、削除、置換
+- アノテーションの作成、移動、変形、色変更、削除、置換
 - アノテーションが存在する状態での全消去
+
+人向けUIで確定済み形状の色が実際に変化した場合もrevisionを1増加し、`get_annotations`、プレビュー、完成PNGは同じ更新後の `color` を使用する。形状の選択、選択解除、同じ色の再選択だけではrevisionを増加しない。
 
 `expectedRevision` を受け取るツールは、その値が現在の `revision` と一致する場合だけ処理する。非同期処理は、結果を作業状態へ反映する直前にも一致を確認する。
 
@@ -63,7 +65,15 @@ revision が一致しない場合、ツールはエラーを返し、作業状�
 - 出力を要求された寸法で生成できない
 - ツール固有の事前条件を満たさない
 
-エラー時は画像とアノテーションを変更しない。ダウンロードを行うツールは、出力の生成と revision の再確認が完了するまでダウンロードを開始しない。
+エラー時は画像とアノテーションを変更しない。ダウンロードを行うツールは、出力の生成と revision の再確認が完了するまでブラウザーへダウンロードを要求しない。
+
+### 2.5 出力結果とフォールバックの境界
+
+- ファイル出力は、成果物の生成、ブラウザーへのダウンロード要求、ブラウザーによる保存完了、会話への表示または添付を別の状態として扱う。
+- `outcome: "download_requested"` は、AnnoForge が成果物を生成し、ブラウザーへダウンロード要求を送信したことだけを表す。ブラウザーによる保存完了、キャンセル、保存先は確認していない。
+- `outcome: "data_returned"` は、Data URL を WebMCP のツール結果オブジェクト内の文字列として呼び出し元へ返したことだけを表す。呼び出し元による画像表示、ファイル化、会話添付は確認していない。
+- ツール結果は、通常のブラウザー操作を実行する許可や指示を含まない。WebMCP ツールがエラーになった場合または保存完了を確認できない場合、呼び出し側は、利用者が通常のブラウザー操作を許可しているときだけ、既存の画面上の保存操作を使用できる。
+- AnnoForge は WebMCP 失敗時に通常のブラウザー操作へ自動で切り替えず、独自の `fallback` フィールドも返さない。実行経路の選択と権限確認は呼び出し側の責務とする。
 
 ## 3. データ仕様
 
@@ -239,7 +249,7 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 ### 4.6 `start_annotations_json_download`
 
-現在のアノテーション JSON のダウンロードを開始する。
+現在のアノテーション JSON を生成し、ブラウザーへダウンロードを要求する。
 
 入力:
 
@@ -247,19 +257,26 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 |---|---|---|---|
 | `expectedRevision` | integer | 必須 | 現在の `revision` と一致する0以上の安全な整数 |
 
-アノテーションが1件以上ある場合だけダウンロードを開始する。アノテーションがない場合はエラーとする。
+アノテーションが1件以上ある場合だけダウンロードを要求する。アノテーションがない場合はエラーとする。
 
 成功結果:
 
 | フィールド | 型 | 値 |
 |---|---|---|
-| `started` | boolean | `true` |
+| `outcome` | string | `download_requested` |
+| `requestDispatched` | boolean | `true` |
+| `completionVerified` | boolean | `false` |
+| `filename` | string | ダウンロード要求に指定したファイル名 |
+| `mimeType` | string | `application/json` |
+| `byteLength` | integer | 生成した JSON Blob のバイト数 |
 | `revision` | integer | ダウンロード対象の revision |
 | `annotationCount` | integer | アノテーション数 |
 
+成功結果はブラウザーへの要求送信までを示す。保存完了は、利用者または呼び出し側がブラウザーのダウンロード一覧で確認する。
+
 ### 4.7 `export_annotated_image`
 
-現在の注釈付き PNG を Data URL として返すか、ダウンロードを開始する。
+現在の注釈付き PNG を Data URL として返すか、ブラウザーへダウンロードを要求する。
 
 入力:
 
@@ -272,7 +289,8 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 | フィールド | 型 | 値 |
 |---|---|---|
-| `delivered` | string | `data_url` |
+| `outcome` | string | `data_returned` |
+| `delivery` | string | `data_url` |
 | `revision` | integer | 出力対象の revision |
 | `annotationCount` | integer | アノテーション数 |
 | `mimeType` | string | `image/png` |
@@ -284,12 +302,20 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 | フィールド | 型 | 値 |
 |---|---|---|
-| `delivered` | string | `download` |
-| `started` | boolean | `true` |
+| `outcome` | string | `download_requested` |
+| `requestDispatched` | boolean | `true` |
+| `completionVerified` | boolean | `false` |
+| `filename` | string | ダウンロード要求に指定したファイル名 |
+| `mimeType` | string | `image/png` |
+| `byteLength` | integer | 生成した PNG Blob のバイト数 |
 | `revision` | integer | ダウンロード対象の revision |
 | `annotationCount` | integer | アノテーション数 |
+| `width` | integer | 元画像の幅 |
+| `height` | integer | 元画像の高さ |
 
 画像が読み込まれていない場合はエラーとする。生成中に revision が変化した場合はエラーを返す。`data_url` が12 × 1024 × 1024文字を超える場合は、`delivery: "download"` を使用する。
+
+`data_url` の成功結果は、ツール呼び出し元へ PNG データを返したことを示す。会話への画像表示またはファイル添付は呼び出し側の機能であり、このツールの成功条件には含めない。`download` の成功結果はブラウザーへの要求送信までを示し、保存完了はブラウザーのダウンロード一覧で別途確認する。
 
 ## 5. ローカル静的サーバー仕様
 
@@ -348,3 +374,5 @@ bash scripts/tools/web/start-local-web.sh
 - 認証、クラウド保存、サーバーを介した共同編集
 - ローカルファイルパスの直接読み取り
 - 会話へ添付したファイルから Data URL を生成するクライアント機能
+- 返却した Data URL を画像またはファイルとして会話へ表示・添付するクライアント機能
+- ブラウザーによるダウンロードの保存完了、キャンセル、保存先をページから確認する機能

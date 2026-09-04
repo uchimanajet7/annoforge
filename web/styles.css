@@ -79,7 +79,8 @@ h2 {
 .color-swatch {
   width: 18px; height: 18px; border-radius: 3px; border: 1px solid #bbb; cursor: pointer;
 }
-.color-swatch.active { outline: 2px solid #3498db; }
+.color-swatch.active { outline: 2px solid #3498db; outline-offset: 2px; }
+.color-swatch:focus-visible { outline: 3px solid #2c3e50; outline-offset: 2px; }
 .file-controls { display: flex; align-items: center; gap: 6px; }
 .file-label { font-size: 0.9rem; color: #2c3e50; }
 .file-pick-btn { background: #fff; color: #2c3e50; border: 1px solid #ccc; padding: 6px 10px; border-radius: 4px; cursor: pointer; }

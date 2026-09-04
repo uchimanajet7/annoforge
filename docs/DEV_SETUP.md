@@ -98,8 +98,13 @@ bash scripts/tools/web/start-local-web.sh
 2. `get_annotations` で初期revisionを取得する。
 3. `open_image_from_data_url` または `open_image_from_url` で画像を開く。
 4. `get_image_preview`、`replace_annotations`、`get_annotations` で対象、反映内容、見た目を確認する。プレビューは元画像の縦横比を保ち、指定最大辺以内で、表示のパン・ズーム・選択表示に依存しないことを確認する。
-5. `export_annotated_image` の `data_url` で完成PNGを取得し、返却寸法が元画像寸法と一致することを確認する。人向け保存が必要な場合だけダウンロードを開始する。
-6. 終了後、起動したターミナルで `Ctrl+C` を押す。
+5. 同じ位置に重なる形状を2件以上用意し、一覧から1件だけを選択してパレットまたはカラーピッカーを操作する。`get_annotations` で対象1件の `color` だけが変わりrevisionが1増えること、一覧・キャンバス・プレビューが同じ色になることを確認する。同じ色の再選択ではrevisionが増えないことも確認する。
+6. 選択操作だけでは次回作図色が変わらず、選択中に実際に選んだ色は、選択解除後に新規作成する形状へ引き継がれることを確認する。
+7. `export_annotated_image` の `data_url` で完成PNGデータを取得し、`outcome: "data_returned"`、`delivery: "data_url"`、返却寸法が元画像寸法と一致することを確認する。会話への画像表示またはファイル添付はクライアント側の別処理として確認する。
+8. 人向け保存を確認する場合は、`start_annotations_json_download` と `export_annotated_image` の `download` を実行し、`outcome: "download_requested"`、`requestDispatched: true`、`completionVerified: false`、ファイル名、MIME type、バイト数、revision、アノテーション数を確認する。PNGでは幅と高さも確認する。
+9. JSONとPNGの保存完了、ファイル名、内容をブラウザーのダウンロード一覧と保存済みファイルで確認する。`download_requested` だけを保存完了の根拠にしない。
+10. WebMCPツールがエラーになった場合の通常UIによる保存は、利用者が通常のブラウザー操作を許可した場合だけ別経路として確認する。ツール結果を操作許可として扱わず、自動フォールバックもしない。
+11. 終了後、起動したターミナルで `Ctrl+C` を押す。
 
 ## 4) CI と同じチェックをローカルで実行
 - Shell/Bash。警告もエラー扱いです。CI と同条件です。
