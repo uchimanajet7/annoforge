@@ -69,6 +69,15 @@ function validateFile(bytes, artifact, format, annotationCount) {
   }
 }
 
+function createExportMarkdown(files) {
+  // サイト由来のファイル名をMarkdown構文やURLのfragmentとして解釈させない。
+  const destination = path => `<${encodeURI(path).replace(/[!&'()*?#]/g,
+    character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}>`;
+  const png = destination(files.png.path);
+  const json = destination(files.json.path);
+  return `![注釈付きPNG](${png})\n\n[PNG](${png}) · [JSON](${json})`;
+}
+
 /**
  * WebMCPの戻り値をモデルへ全文展開せず、同じ実行環境で保存する受信処理。
  * callToolには、接続済みページの公開Site tools呼出しを渡す。
@@ -112,7 +121,8 @@ export async function receiveAnnotationExport({ callTool, expectedRevision, outp
     }
     result = {
       outcome: 'files_verified', revision: manifest.revision,
-      annotationCount: manifest.annotationCount, directory, files
+      annotationCount: manifest.annotationCount, directory, files,
+      markdown: createExportMarkdown(files)
     };
   } catch (error) {
     failure = error;
@@ -138,6 +148,7 @@ export async function receiveAnnotationExport({ callTool, expectedRevision, outp
     }
   }
   if (failure) throw failure;
-  // 会話への添付は呼出し側がこの絶対パスを使用して行う。保存だけで添付済みとはしない。
+  // 呼出し側はPNGを表示確認し、markdownを最終回答の本文に含める。
+  // この関数は会話レンダラーを操作しないため、保存だけで添付済みとはしない。
   return result;
 }

@@ -83,8 +83,29 @@ test('PNGとJSONの実バイト列を保存し、絶対パスを返し、準備�
   assert.equal(result.annotationCount, 1);
   assert.deepEqual(await readFile(result.files.png.path), png);
   assert.deepEqual(await readFile(result.files.json.path), json);
+  assert.match(result.markdown, /^!\[注釈付きPNG\]\(<\//);
+  assert.match(result.markdown, /\[PNG\]\(<.*>\) · \[JSON\]\(<.*>\)$/);
+  const destinations = [...result.markdown.matchAll(/\(<([^>]+)>\)/g)].map(match => decodeURIComponent(match[1]));
+  assert.deepEqual(destinations, [result.files.png.path, result.files.png.path, result.files.json.path]);
   assert.equal(tools.calls.at(-1).name, 'release_annotation_export');
   assert.ok(tools.calls.every(call => !call.name.includes('download')));
+});
+
+test('空白・日本語・括弧・URL区切りを含む実パスから安全な画像とファイルリンクを生成する', async t => {
+  const root = await outputRoot(t);
+  const outputDirectory = join(root, '表示 (確認) #1 %');
+  const tools = mockTools({ mutateManifest: manifest => {
+    manifest.artifacts.png.filename = '画像 [完成](1) #100% &copy;.png';
+    manifest.artifacts.json.filename = '注釈 [完成](1) #100% &copy;.json';
+  } });
+  const result = await receiveAnnotationExport({ callTool: tools.callTool, expectedRevision: 7, outputDirectory });
+  const destinations = [...result.markdown.matchAll(/\(<([^>]+)>\)/g)].map(match => match[1]);
+  assert.equal(destinations.length, 3);
+  assert.deepEqual(destinations.map(decodeURIComponent), [result.files.png.path, result.files.png.path, result.files.json.path]);
+  assert.ok(destinations.every(path => !/[\s()#&\[\]]/.test(path)));
+  assert.deepEqual(await readFile(result.files.png.path), png);
+  assert.deepEqual(await readFile(result.files.json.path), json);
+  assert.doesNotMatch(result.markdown, /data:|base64|```/);
 });
 
 test('再実行しても既存ファイルを上書きせず、別の出力先を作る', async t => {
@@ -142,6 +163,7 @@ test('ページ内バッファの解放失敗を、検証済みファイルの�
   const result = await receiveAnnotationExport({ callTool: tools.callTool, expectedRevision: 7, outputDirectory });
   assert.equal(result.outcome, 'files_verified');
   assert.match(result.releaseWarning, /release failed/);
+  assert.match(result.markdown, /^!\[注釈付きPNG\]/);
   assert.deepEqual(await readFile(result.files.png.path), png);
 });
 

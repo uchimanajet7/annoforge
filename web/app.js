@@ -1857,7 +1857,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'start_annotations_json_download',
         title: 'アノテーションJSONの保存を開始',
-        description: '現在の版が expectedRevision と一致し、アノテーションがある場合だけ、現在の draw のJSONを生成してブラウザーへダウンロードを要求します。結果は要求送信までを示し、ブラウザーでの保存完了は確認しません。PNGとJSONの実ファイル受信にはprepare_annotation_exportとread_annotation_exportによる直接取得経路もあります。',
+        description: 'ブラウザーのダウンロード一覧でJSONを受け取るための保存要求です。expectedRevisionが現在の版と一致し、注釈がある場合に現在のdrawをJSONとして生成します。結果は要求送信までを示します。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
         inputSchema: downloadInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1875,7 +1875,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'export_annotated_image',
         title: '注釈付き画像を出力',
-        description: '現在の版が expectedRevision と一致する場合だけ、元画像と確定済みアノテーションを元画像と同じ寸法のPNGとして出力します。data_urlはPNGデータをツール呼び出し元へ返しますが、会話への表示や添付は保証しません。downloadはブラウザーへダウンロードを要求しますが、保存完了は確認しません。実ファイルを受信して会話へ添付する場合は、prepare_annotation_exportとread_annotation_exportでPNGとJSONを直接取得できます。表示のパン、ズーム、選択状態は結果へ影響しません。',
+        description: 'PNG単体をData URLで取得するか、ブラウザーのダウンロード一覧へ保存要求する用途です。expectedRevisionが現在の版と一致する場合に元画像寸法で生成し、表示のパン・ズーム・選択状態は含めません。data_urlの結果は文字列、downloadの結果は要求送信の通知です。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
         inputSchema: exportImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1908,7 +1908,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'prepare_annotation_export',
         title: 'PNGとJSONの受け渡しを準備',
-        description: '同じexpectedRevisionの元画像寸法PNGと注釈JSONを生成し、exportIdと各ファイルの名前・バイト数・SHA-256を返します。自動ダウンロードは行いません。read_annotation_exportで実データを取得できます。準備済み出力はページ内で1組だけ保持し、新しい準備・画像や注釈の編集・release_annotation_export・ページ終了で無効になります。保存と会話への添付は呼び出し側が行います。',
+        description: '会話へ渡す元画像寸法PNGと完全な注釈JSONの実ファイルを準備します。同じexpectedRevisionの2ファイルのexportId・名前・バイト数・SHA-256を返します。read_annotation_exportの戻り値を同じJavaScript実行環境で復号・ファイル保存し、検証した絶対パスを最終回答の画像とファイルリンクに使えます。ブラウザーダウンロードは使いません。準備済み出力は1組で、新しい準備・画像や注釈の編集・release_annotation_export・ページ終了で無効になります。',
         inputSchema: downloadInputSchema,
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: async (input, { signal } = {}) => {
@@ -1920,7 +1920,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'read_annotation_export',
         title: '準備済み出力のバイト列を取得',
-        description: '準備したPNGまたはJSONの指定範囲をbase64で返します。offsetはバイト位置です。nextOffsetまで順に取得し、元のバイト列として連結してください。結果を会話へ全文展開する必要はありません。取得した実ファイルのバイト数とSHA-256を準備結果と照合してください。これはプレビューでもダウンロード開始通知でもありません。',
+        description: 'prepare_annotation_exportで準備したPNGまたはJSONの実バイト列を、指定範囲のbase64として返します。offsetからnextOffsetまでの各範囲を呼出しコード内で復号して順番に保存でき、eofが末尾を示します。保存したファイルのバイト数・SHA-256を準備結果と照合します。base64はモデルによる転記ではなくプログラムで扱うデータです。',
         inputSchema: {
           type: 'object', additionalProperties: false,
           required: ['exportId', 'format', 'offset', 'maxBytes'],

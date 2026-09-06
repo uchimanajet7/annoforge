@@ -1,6 +1,6 @@
 # AnnoForge WebMCP（ChatGPT Site tools）仕様
 
-- 仕様バージョン: 3.5
+- 仕様バージョン: 3.6
 - 人向け機能仕様: [SPEC.md](./SPEC.md)
 
 ## 1. 適用範囲
@@ -378,20 +378,24 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 `receiveAnnotationExport({ callTool, expectedRevision, outputDirectory })` に、接続済みページの公開ツール呼出しと、保存を許可されたディレクトリの絶対パスを渡す。`callTool(name, input)` は、当該ツールの結果オブジェクトを返す非同期関数とする。ブラウザーの接続APIや特定のタブIDはモジュールに含めない。
 
-対応クライアントのNode.js実行環境で、接続済み `siteTools` を使う例（パスは実際の絶対パスへ置換）:
+公開Site toolsの呼出しとファイル保存は、同じJavaScript実行環境内で接続する。別のREPLへハンドルを引き継いだり、モデルがbase64をツール引数へ転記したりする方法は使わない。
+
+以下は、CodexのCUA REPLで取得済みの `tab` を使う接続例。`tab` の取得は、その実行環境が返すブラウザーAPIの説明に従う。モジュールを配置済みの開発・連携環境向けの例であり、Webアプリの利用者にリポジトリ取得やNode.jsのインストールを要求するものではない。パスは実際に許可された絶対パスへ置換する。
 
 ```javascript
 const { receiveAnnotationExport } = await import(
   '/absolute/path/to/annoforge/scripts/tools/web/receive-annotation-export.mjs'
 );
+const webmcp = await tab.capabilities.get('webmcp');
+const siteTools = await webmcp.fetchTools();
 const state = await siteTools.call('get_annotations', {});
 const received = await receiveAnnotationExport({
   callTool: (name, input) => siteTools.call(name, input),
   expectedRevision: state.revision,
   outputDirectory: '/absolute/path/to/approved-output-directory'
 });
-// received.files.png.path と received.files.json.path を最終回答で使用する。
-// base64をモデルへのツール出力として全文表示する必要はない。
+// ここへ返るのは検証済みファイルのパスと表示用Markdown。base64は出力しない。
+nodeRepl.write(received);
 ```
 
 受信処理は次を実行する。
@@ -402,11 +406,13 @@ const received = await receiveAnnotationExport({
 4. 保存後に両ファイルのバイト数とSHA-256、PNGのシグネチャ・寸法・チャンクCRC・終端、JSONのUTF-8・構文・注釈数を検証する。
 5. 準備済み出力を解放する。受信失敗時は、この呼出しが作成した不完全ファイルだけを削除する。
 
-成功結果は `outcome: "files_verified"`、`revision`、`annotationCount`、`directory` と、メタデータ・絶対 `path` を含む `files.png` / `files.json`。解放だけに失敗した場合は `releaseWarning` も返し、検証済みファイルは残す。保存は [Node.jsのファイルAPI](https://nodejs.org/api/fs.html)、整合性確認は [SHA-256](https://nodejs.org/api/crypto.html#cryptocreatehashalgorithm-options) と [PNGチャンクのCRC](https://nodejs.org/api/zlib.html#zlibcrc32data-value) を使用する。
+成功結果は `outcome: "files_verified"`、`revision`、`annotationCount`、`directory`、メタデータ・絶対 `path` を含む `files.png` / `files.json`、最終回答に使える `markdown`。`markdown` は検証済みPNGの画像埋込みと、PNG・JSONそれぞれのファイルリンクを含む。パス中の空白・括弧・URLの区切り文字は符号化し、利用者由来のファイル名をMarkdownとして解釈させない。[CommonMarkの画像・リンク構文](https://spec.commonmark.org/0.31.2/#images)を使用する。解放だけに失敗した場合は `releaseWarning` も返し、検証済みファイルは残す。保存は [Node.jsのファイルAPI](https://nodejs.org/api/fs.html)、整合性確認は [SHA-256](https://nodejs.org/api/crypto.html#cryptocreatehashalgorithm-options) と [PNGチャンクのCRC](https://nodejs.org/api/zlib.html#zlibcrc32data-value) を使用する。
 
-保存成功は会話添付成功と同義ではない。Codexでは、受信PNGを画像表示機能でデコード確認し、最終回答に `![注釈付きPNG](/absolute/path/to/annotated.png)`、JSONを `[注釈JSON](/absolute/path/to/annotations.json)` として含める。PNGのツール内表示だけ、Data URL文字列、保存完了の文章だけで終わらせない。JSON本文を依頼された場合は、取得したJSONファイルの内容も表示する。
+保存成功は会話添付成功と同義ではない。Codexでは、受信PNGを画像表示機能でデコード確認し、`received.markdown` の内容を最終回答の本文へ含める。Markdown自体をコードブロックで囲まない。PNGのツール内表示だけ、Data URL文字列、保存完了の文章だけで終わらせない。JSON本文を依頼された場合は、取得したJSONファイルの内容も表示する。
 
-これは実行側で利用するモジュールであり、ページの更新だけでCodexが自動実行する仕組みではない。利用するエージェントには、このモジュールで受信して最終回答に実ファイルを提示することまで依頼する。別クライアントは同じ公開ツール契約で受信・検証・提示を実装できる。
+これは実行側で利用するモジュールであり、ページの更新だけでCodexが自動実行する仕組みではない。モジュールがないクライアントも、同じ公開ツール契約と自身のファイル機能で受信・検証・提示できる。利用者は成果物の取得と表示を依頼し、エージェントが利用可能な実行環境と保存権限を確認して経路を選ぶ。
+
+ブラウザーへの保存要求を代替にする場合、汎用PlaywrightのAPIをそのままCodexで使えるとは仮定しない。そのクライアントに公開された受信APIを確認し、[Playwrightのダウンロード手順](https://playwright.dev/docs/downloads)のように要求前の待受けと保存完了の取得を接続する。待受け開始やダウンロード操作がエラーなく戻っただけでは、実ファイルを取得したことにはならない。
 
 ## 5. ローカル静的サーバー仕様
 
