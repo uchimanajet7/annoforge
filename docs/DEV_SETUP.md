@@ -1,6 +1,6 @@
 # ローカル開発セットアップ
 
-本書は、CI と同じチェックである ShellCheck と Terraform の fmt/validate をローカルで再現し、環境差や部分最適を排除するための最短セットアップを示します。
+本書は、CI と同じ ShellCheck、Terraform の fmt/validate、WebMCP受信処理のJavaScript検査・テストをローカルで実行するためのセットアップを示します。
 
 本書のコマンド例は、原則としてリポジトリルートでの実行を前提とします。
 
@@ -33,6 +33,7 @@ brew install awscli jq
 - AWS CLI: v2。任意です。デプロイで使います。
 - Python: 3.13。Pillow Layer のローカル生成で使います。該当作業を行わない場合は任意です。
 - jq: 1.6。任意です。スモーク時の JSON 整形で使います。
+- Node.js: 22.2以上。WebMCPのファイル受信モジュールとそのテストを使う場合だけ必要です。標準モジュールだけを使うため、`npm install` は不要です。CIではNode.js 24を使用します。通常のWeb UIには不要です。
 
 ### 任意: 一括セットアップ
 ```
@@ -54,6 +55,7 @@ Homebrew のインストールとシェル設定は公式手順を参照して�
 shellcheck --version
 terraform -version
 aws --version   # 任意
+node --version  # WebMCPの受信処理・テストを行う場合
 ```
 ```
 bash scripts/tools/check_updates.sh   # 任意: 最新差分を確認
@@ -100,15 +102,25 @@ bash scripts/tools/web/start-local-web.sh
 4. `get_image_preview`、`replace_annotations`、`get_annotations` で対象、反映内容、見た目を確認する。プレビューは元画像の縦横比を保ち、指定最大辺以内で、表示のパン・ズーム・選択表示に依存しないことを確認する。
 5. 同じ位置に重なる形状を2件以上用意し、一覧から1件だけを選択してパレットまたはカラーピッカーを操作する。`get_annotations` で対象1件の `color` だけが変わりrevisionが1増えること、一覧・キャンバス・プレビューが同じ色になることを確認する。同じ色の再選択ではrevisionが増えないことも確認する。
 6. 選択操作だけでは次回作図色が変わらず、選択中に実際に選んだ色は、選択解除後に新規作成する形状へ引き継がれることを確認する。
-7. 最終 `get_annotations` の完全なJSON、revision、アノテーション数を保持し、最終応答にJSONコードブロックとして表示できることを確認する。ファイル成果物も必要な試験だけ `start_annotations_json_download` を実行する。
-8. `export_annotated_image` で完成PNGを生成する。対象クライアントで `data_url` が実画像として会話へ表示されることを同じ実行面で確認済みの場合だけ、その経路を完全経路に使用できる。現在確認済みのCodexデスクトップ経路では `delivery: "download"` を使用し、返されたファイル名、MIME type、バイト数、revision、アノテーション数、幅、高さを記録する。
-9. `delivery: "download"` の場合、`outcome: "download_requested"`、`requestDispatched: true`、`completionVerified: false` は要求送信までの証拠として扱う。ブラウザーのダウンロード一覧で完了を確認し、必要な利用者承認を経たクライアントの通常のファイル機能で、その呼び出しが作成した実ファイルだけを読み取る。PNGシグネチャ、非ゼロのファイル長、幅、高さを検証し、スクリーンショットやキャンバス表示を代替成果物にしない。
-10. 同じ最終応答に、手順7の完全なJSONと、手順9で検証した実PNGを表示または添付する。ツール呼び出し結果、ブラウザー上の画像、ダウンロード一覧、ファイルパス、要約文だけでは合格にしない。実PNGが応答内で利用者に見えない場合は未完了であり、「添付済み」と報告しない。
-11. `data_url` のクライアント対応を別途調べる場合は、実画像として表示されたかを受入条件にする。長いJSON文字列が切り詰められた場合、WebMCPによるPNG生成失敗とは分類せず、当該クライアントの提示経路未対応として記録する。出力上限の増加、同じData URLの再試行、仕様化されていない画像コンテンツ形式の追加では回避しない。
-12. Site toolsを先に試したうえで、必要なツールが利用できない、処理がエラーになる、または結果後の保存実ファイル・会話提示を確認できない場合は、利用者の依頼とクライアントの通常権限に従って既存UIやファイル機能へ切り替える。同じ失敗操作を無条件に反復せず、切替後も保存実ファイルの検証と会話への実画像表示まで同じ受入条件を適用する。ツール結果を操作許可として扱わず、AnnoForgeが自動フォールバックするものとも、切替後の操作をWebMCPとも扱わない。
-13. 終了後、起動したターミナルで `Ctrl+C` を押す。
+7. 最終 `get_annotations` の完全なJSON、revision、注釈数を保持する。[受信モジュールの実行例](WEBMCP.md#411-クライアント側の受信と会話への添付) に従い、対応クライアントのNode.js実行環境で公開Site toolsと許可された保存先を渡して、PNG・JSONを取得する。
+8. `prepare_annotation_export`、`read_annotation_export`、`release_annotation_export` だけでファイル受信が完結し、自動ダウンロード、画面の保存ボタン、クリップボードを使わないことを確認する。受信モジュールが保存後のバイト数・SHA-256、PNG構造・寸法、JSON構文・注釈数を検証し、両方の絶対パスを返すことを確認する。
+9. 実PNGを画像表示機能でデコードし、元画像寸法の注釈付き画像で選択枠などを含まないことを確認する。最終回答に実PNGのMarkdown画像とJSONファイルへのリンクを含め、JSON本文を依頼された場合は完全な内容も表示する。ツール内表示、ファイルパスの文字列、成功の要約だけで合格にしない。
+10. 準備後に注釈を編集すると古いexportIdの読取りが拒否され、最新revisionで再準備したPNGとJSONには編集が反映されることを確認する。選択・ズームだけでは無効にならないこと、新しい準備・解放・再読込み後には古いIDを使えないことも確認する。
+11. 直接受信できないクライアントでダウンロードを試す場合は、クライアントが提供する許可・待受けを開始してから要求し、保存された実ファイルを検証する。`completionVerified: false` は保存完了の証拠にしない。保存ボタンも同じ要求処理なので、押し直すだけをフォールバックとは扱わない。
+12. 終了後、起動したターミナルで `Ctrl+C` を押す。
 
 ## 4) CI と同じチェックをローカルで実行
+
+- WebMCPの受信処理。追加パッケージなしで構文検査とNode.js標準テストを実行します。
+
+```bash
+node --check web/app.js
+node --check scripts/tools/web/receive-annotation-export.mjs
+node --test tests/webmcp-export.test.mjs
+```
+
+テストは小さいPNG・JSON、分割取得が必要な13 MiBのPNG、破損・版不一致・不正入力・上書き防止・後処理を検証します。テスト用ファイルは実行環境の一時領域に一意なディレクトリを作り、終了後にそのテストが作成したディレクトリだけを削除します。一時領域を明示する場合は、`ANNOFORGE_TEST_TMP_DIR` に許可されたディレクトリの絶対パスを指定します。モックを使う受信単体テストであり、実ブラウザーのWebMCP接続と最終回答への画像表示は3.5の経路で別途確認します。
+
 - Shell/Bash。警告もエラー扱いです。CI と同条件です。
 ```
 bash scripts/tools/lint_shell.sh --strict
@@ -130,7 +142,10 @@ bash scripts/tools/fmt_terraform.sh --write
 ```
 bash scripts/tools/lint_shell.sh --strict \
   && bash scripts/tools/fmt_terraform.sh --check \
-  && bash scripts/tools/fmt_terraform.sh --validate
+  && bash scripts/tools/fmt_terraform.sh --validate \
+  && node --check web/app.js \
+  && node --check scripts/tools/web/receive-annotation-export.mjs \
+  && node --test tests/webmcp-export.test.mjs
 ```
 
 ## 5) よくあるつまずき
@@ -154,6 +169,7 @@ bash scripts/tools/lint_shell.sh --strict \
 - ローカル/CI 共通スクリプト: `scripts/tools/`
   - `lint_shell.sh` は ShellCheck、`fmt_terraform.sh` は Terraform の整形と検証です。
 - CI はこれらを呼ぶだけです。push のときだけ `terraform fmt` を自動適用し、bot がコミットします。
+- WebMCP受信処理のCIジョブは、Node.js 24で構文検査と単体テストを行います。権限は `contents: read`、パッケージのインストール・キャッシュは不要です。
 - Terraform は GitHub Actions では `hashicorp/setup-terraform@v4` を使用して固定版を導入します。
 - 出力とカラー方針は `docs/SPEC.md` に明記しています。CI は無色で、UI 側で色付けします。
 - 方針: CI 相当チェックは `docs/SPEC.md` の CI ポリシーに従います。

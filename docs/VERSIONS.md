@@ -21,6 +21,7 @@
 - Pillow: 12.2.0。レイヤーに封入しています。
 - Konva: 10.2.0。`web/index.html` のCDN設定です。
 - Static Web Server: 最新安定版。`scripts/tools/web/start-local-web.sh` の通常起動時に決定します。
+- Node.js: WebMCPファイル受信・テスト用に22.2以上。通常のWeb UIやLambdaには不要です。CIの受信テストは24を使用します。
 - Terraform: 1.5+。1.6+ を推奨します。
 - Terraform AWS Provider: `~> 6.0`
 - Terraform Archive Provider: `~> 2.4`

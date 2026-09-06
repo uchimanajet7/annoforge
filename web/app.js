@@ -105,6 +105,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 形状モデル配列（原寸座標で保持）
   const shapes = []; // { id, type, colorHex, thickness, ...geometry }
   let workspaceRevision = 0;
+  let preparedAnnotationExport = null;
+  const WEBMCP_EXPORT_CHUNK_BYTES = 256 * 1024;
+  const WEBMCP_EXPORT_MAX_CHUNK_BYTES = 1024 * 1024;
   const WEBMCP_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
   const WEBMCP_MAX_DATA_URL_LENGTH = 12 * 1024 * 1024;
   const WEBMCP_PREVIEW_DEFAULT_MAX_DIMENSION = 1024;
@@ -116,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function advanceWorkspaceRevision() {
     workspaceRevision += 1;
+    preparedAnnotationExport = null;
   }
 
   function cancelDraft() {
@@ -1491,6 +1495,22 @@ document.addEventListener('DOMContentLoaded', () => {
     return input;
   }
 
+  function validateWebMcpExportReference(input, read = false) {
+    assertWebMcpObject(input, 'input');
+    assertWebMcpExactKeys(input, read ? ['exportId', 'format', 'offset', 'maxBytes'] : ['exportId'], 'input');
+    if (typeof input.exportId !== 'string' || !input.exportId) {
+      throw new TypeError('input.exportId は出力準備で取得した識別子である必要があります');
+    }
+    if (read) {
+      if (input.format !== 'png' && input.format !== 'json') throw new TypeError('input.format はpngまたはjsonである必要があります');
+      assertWebMcpRevision(input.offset, 'input.offset');
+      if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1 || input.maxBytes > WEBMCP_EXPORT_MAX_CHUNK_BYTES) {
+        throw new TypeError(`input.maxBytes は1以上${WEBMCP_EXPORT_MAX_CHUNK_BYTES}以下の整数である必要があります`);
+      }
+    }
+    return input;
+  }
+
   function assertWebMcpObject(value, path) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
       throw new TypeError(`${path} はオブジェクトである必要があります`);
@@ -1837,7 +1857,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'start_annotations_json_download',
         title: 'アノテーションJSONの保存を開始',
-        description: '現在の版が expectedRevision と一致し、アノテーションがある場合だけ、現在の draw のJSONを生成してブラウザーへダウンロードを要求します。結果は要求送信までを示し、ブラウザーでの保存完了は確認しません。',
+        description: '現在の版が expectedRevision と一致し、アノテーションがある場合だけ、現在の draw のJSONを生成してブラウザーへダウンロードを要求します。結果は要求送信までを示し、ブラウザーでの保存完了は確認しません。PNGとJSONの実ファイル受信にはprepare_annotation_exportとread_annotation_exportによる直接取得経路もあります。',
         inputSchema: downloadInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1855,7 +1875,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'export_annotated_image',
         title: '注釈付き画像を出力',
-        description: '現在の版が expectedRevision と一致する場合だけ、元画像と確定済みアノテーションを元画像と同じ寸法のPNGとして出力します。data_urlはPNGデータをツール呼び出し元へ返しますが、会話への表示や添付は保証しません。downloadはブラウザーへダウンロードを要求しますが、保存完了は確認しません。表示のパン、ズーム、選択状態は結果へ影響しません。',
+        description: '現在の版が expectedRevision と一致する場合だけ、元画像と確定済みアノテーションを元画像と同じ寸法のPNGとして出力します。data_urlはPNGデータをツール呼び出し元へ返しますが、会話への表示や添付は保証しません。downloadはブラウザーへダウンロードを要求しますが、保存完了は確認しません。実ファイルを受信して会話へ添付する場合は、prepare_annotation_exportとread_annotation_exportでPNGとJSONを直接取得できます。表示のパン、ズーム、選択状態は結果へ影響しません。',
         inputSchema: exportImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1882,6 +1902,54 @@ document.addEventListener('DOMContentLoaded', () => {
             height: imageResult.height,
             dataUrl: imageResult.dataUrl
           };
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'prepare_annotation_export',
+        title: 'PNGとJSONの受け渡しを準備',
+        description: '同じexpectedRevisionの元画像寸法PNGと注釈JSONを生成し、exportIdと各ファイルの名前・バイト数・SHA-256を返します。自動ダウンロードは行いません。read_annotation_exportで実データを取得できます。準備済み出力はページ内で1組だけ保持し、新しい準備・画像や注釈の編集・release_annotation_export・ページ終了で無効になります。保存と会話への添付は呼び出し側が行います。',
+        inputSchema: downloadInputSchema,
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, { signal } = {}) => {
+          const { expectedRevision } = validateWebMcpDownloadInput(input);
+          return prepareAnnotationExport(expectedRevision, signal);
+        }
+      });
+
+      await document.modelContext.registerTool({
+        name: 'read_annotation_export',
+        title: '準備済み出力のバイト列を取得',
+        description: '準備したPNGまたはJSONの指定範囲をbase64で返します。offsetはバイト位置です。nextOffsetまで順に取得し、元のバイト列として連結してください。結果を会話へ全文展開する必要はありません。取得した実ファイルのバイト数とSHA-256を準備結果と照合してください。これはプレビューでもダウンロード開始通知でもありません。',
+        inputSchema: {
+          type: 'object', additionalProperties: false,
+          required: ['exportId', 'format', 'offset', 'maxBytes'],
+          properties: {
+            exportId: { type: 'string', minLength: 1 },
+            format: { type: 'string', enum: ['png', 'json'] },
+            offset: { type: 'integer', minimum: 0 },
+            maxBytes: { type: 'integer', minimum: 1, maximum: WEBMCP_EXPORT_MAX_CHUNK_BYTES, default: WEBMCP_EXPORT_CHUNK_BYTES }
+          }
+        },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (input, { signal } = {}) => readAnnotationExport(validateWebMcpExportReference(input, true), signal)
+      });
+
+      await document.modelContext.registerTool({
+        name: 'release_annotation_export',
+        title: '準備済み出力を解放',
+        description: '指定したexportIdが現在の準備済み出力と一致する場合だけメモリーから解放します。画像と注釈、取得済みファイルは変更しません。既に解放済みの場合はreleased:falseを返します。',
+        inputSchema: {
+          type: 'object', additionalProperties: false, required: ['exportId'],
+          properties: { exportId: { type: 'string', minLength: 1 } }
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        execute: async (input, { signal } = {}) => {
+          throwIfWebMcpExecutionAborted(signal);
+          const { exportId } = validateWebMcpExportReference(input);
+          const released = preparedAnnotationExport?.exportId === exportId;
+          if (released) preparedAnnotationExport = null;
+          return { exportId, released };
         }
       });
     } catch (error) {
@@ -2064,9 +2132,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function createAnnotationsJsonArtifact() {
-    if (shapes.length === 0) {
-      throw new Error('アノテーションJSONを保存する前にアノテーションを作成してください');
-    }
     const revision = workspaceRevision;
     const annotationCount = shapes.length;
     const json = JSON.stringify(getAnnotationDocument(), null, 2);
@@ -2085,6 +2150,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function requestAnnotationsJsonDownload(expectedRevision, signal) {
     if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
     throwIfWebMcpExecutionAborted(signal);
+    if (shapes.length === 0) throw new Error('アノテーションJSONを保存する前にアノテーションを作成してください');
     const artifact = createAnnotationsJsonArtifact();
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== artifact.revision) {
@@ -2107,7 +2173,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const { canvas, width, height } = createAnnotatedImageCanvas();
     const dataUrl = createPngDataUrl(canvas, '注釈付き画像をPNGとして生成できません');
     if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
-      throw new RangeError('注釈付き画像のData URLが12 MiBを超えています。deliveryをdownloadにして保存してください');
+      throw new RangeError('注釈付き画像のData URLが12 MiBを超えています。prepare_annotation_exportとread_annotation_exportで分割取得するか、保存完了を確認できるクライアントでdownloadを使用してください');
     }
     const image = await decodeImageSource(dataUrl, signal);
     assertDecodedImageSize(image, width, height, '注釈付き画像');
@@ -2177,6 +2243,56 @@ document.addEventListener('DOMContentLoaded', () => {
     const artifact = await createAnnotatedImageArtifact(signal, expectedRevision);
     throwIfWebMcpExecutionAborted(signal);
     return requestBrowserDownload(artifact);
+  }
+
+  async function describeExportArtifact(artifact) {
+    const digest = await crypto.subtle.digest('SHA-256', await artifact.blob.arrayBuffer());
+    const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const { blob, revision, annotationCount, ...metadata } = artifact;
+    return { ...metadata, sha256 };
+  }
+
+  async function prepareAnnotationExport(expectedRevision, signal) {
+    throwIfWebMcpExecutionAborted(signal);
+    assertCurrentWorkspaceRevision(expectedRevision);
+    const json = createAnnotationsJsonArtifact();
+    const png = await createAnnotatedImageArtifact(signal, expectedRevision);
+    const [pngMetadata, jsonMetadata] = await Promise.all([describeExportArtifact(png), describeExportArtifact(json)]);
+    throwIfWebMcpExecutionAborted(signal);
+    assertCurrentWorkspaceRevision(expectedRevision);
+    const exportId = crypto.randomUUID();
+    preparedAnnotationExport = { exportId, revision: expectedRevision, png, json };
+    return {
+      outcome: 'export_prepared', exportId, revision: expectedRevision, annotationCount: json.annotationCount,
+      artifacts: { png: pngMetadata, json: jsonMetadata }
+    };
+  }
+
+  function getPreparedAnnotationExport(exportId) {
+    if (!preparedAnnotationExport || preparedAnnotationExport.exportId !== exportId) {
+      throw new Error('出力は無効または解放済みです。最新のrevisionでprepare_annotation_exportを再実行してください');
+    }
+    assertCurrentWorkspaceRevision(preparedAnnotationExport.revision);
+    return preparedAnnotationExport;
+  }
+
+  async function readAnnotationExport({ exportId, format, offset, maxBytes }, signal) {
+    throwIfWebMcpExecutionAborted(signal);
+    const prepared = getPreparedAnnotationExport(exportId);
+    const artifact = prepared[format];
+    if (offset >= artifact.byteLength) throw new RangeError('input.offset はファイルのバイト数未満である必要があります');
+    const nextOffset = Math.min(offset + maxBytes, artifact.byteLength);
+    const bytes = new Uint8Array(await artifact.blob.slice(offset, nextOffset).arrayBuffer());
+    throwIfWebMcpExecutionAborted(signal);
+    getPreparedAnnotationExport(exportId);
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += 32768) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 32768));
+    }
+    return {
+      exportId, revision: prepared.revision, format, offset, nextOffset,
+      eof: nextOffset === artifact.byteLength, base64: btoa(binary)
+    };
   }
 
   function makeFileName(baseName, fallback, suffix) {
