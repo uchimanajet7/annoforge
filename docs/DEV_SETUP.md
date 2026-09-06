@@ -70,7 +70,7 @@ bash scripts/tools/fmt_terraform.sh --check
 
 ## 3.5) WebMCPのローカル静的サーバー
 
-未公開のローカル版をWebMCP対応ブラウザーで使うときだけ使用します。通常の人向けローカル利用では、従来どおり `web/index.html` を直接開けます。
+手元のリポジトリをWebMCP対応ブラウザーから利用する場合に使います。WebMCPを使わずに画像を編集する場合は、`web/index.html` をブラウザーで直接開けます。
 
 ```
 bash scripts/tools/web/start-local-web.sh

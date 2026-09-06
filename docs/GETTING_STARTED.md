@@ -15,7 +15,7 @@ AnnoForgeで画像を編集するだけなら、ブラウザーと画像があ�
 
 ### 画像を開く
 
-1. [公開Webアプリ](https://uchimanajet7.github.io/annoforge/)を開きます。
+1. [AnnoForge](https://uchimanajet7.github.io/annoforge/)を開きます。
 2. 「画像を選択」で画像ファイルを選ぶか、キャンバスへドラッグ&ドロップします。
 
 リポジトリを手元に取得済みなら、[web/index.html](../web/index.html) をブラウザーで直接開く方法も使えます。描画ライブラリのKonva.jsを外部CDNから読み込むため、ローカル利用でもインターネット接続が必要です。
@@ -55,7 +55,7 @@ AnnoForgeで画像を編集するだけなら、ブラウザーと画像があ�
 
 Site toolsに対応したクライアントが必要です。ChatGPT / Codexのモデル・ワークスペースなどの利用条件は、[OpenAIのSite tools案内](https://learn.chatgpt.com/docs/webmcp)で確認してください。通常のブラウザー操作にはWebMCP対応は不要です。
 
-1. 対応クライアントの内蔵ブラウザーで[公開Webアプリ](https://uchimanajet7.github.io/annoforge/)を開き、AnnoForgeのSite toolsを利用できることを確認します。公開版を使う場合、ローカルサーバーの起動は不要です。
+1. 対応クライアントの内蔵ブラウザーで[AnnoForge](https://uchimanajet7.github.io/annoforge/)を開き、Site toolsを利用できることを確認します。
 2. 画像を画面から読み込むか、エージェントへ画像URLを渡して読み込みを依頼します。外部URLを使う場合はHTTPSの画像URLと、配信元のCORS許可が必要です。会話に添付した画像を渡せるかどうかはクライアントの機能に依存します。
 3. エージェントへ、対象と付けたい注釈を伝え、Site toolsで画像を確認して注釈を反映するよう依頼します。画像認識と注釈候補の生成はエージェントが行います。
 4. エージェントの操作が停止してから、同じタブのキャンバスで必要な図形を手動修正します。編集後も同じタブを維持し、ページは再読み込みしません。
@@ -71,7 +71,7 @@ WebMCPでファイルのデータを取得することと、会話へ画像や�
 
 直接受信を利用できない場合は、利用者の許可とクライアントの機能に応じてダウンロードなどの代替経路を使います。代替経路での保存確認やツールごとの制約は、[WebMCP仕様](WEBMCP.md)に記載しています。
 
-### ローカル版をWebMCPで使う場合
+### 手元のリポジトリをWebMCPで使う場合
 
 手元のリポジトリを対応クライアントから使う場合だけ、ローカル静的サーバーを起動します。macOS / Linux向けの起動スクリプトです。対応するOS・CPUと必要コマンドは[ローカル静的サーバーの対応環境](WEBMCP.md#52-対応環境)を確認してください。
 
@@ -85,7 +85,7 @@ bash scripts/tools/web/start-local-web.sh
 
 ## GitHub Pagesで自分のサイトを公開する
 
-この手順は、自分のリポジトリからWeb UIを公開する場合だけ必要です。既存の公開Webアプリを利用する人は実施しません。
+自分のGitHubリポジトリからAnnoForgeを公開する場合の手順です。
 
 1. 自分のGitHubリポジトリにAnnoForgeを用意します。フォークを使う場合は、Actionsタブでワークフローが有効になっていることを確認してください。
 2. リポジトリの Settings → Pages → Build and deployment → Source で「GitHub Actions」を選びます。

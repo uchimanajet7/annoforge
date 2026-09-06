@@ -2,7 +2,7 @@
 
 ブラウザーで画像に図形の注釈を付け、注釈付きPNGと注釈JSONを保存できるツールです。通常の画像編集・保存に、AWS環境の構築は必要ありません。
 
-[公開Webアプリを開く](https://uchimanajet7.github.io/annoforge/)
+[AnnoForgeを開く](https://uchimanajet7.github.io/annoforge/)
 
 ## できること
 
@@ -14,7 +14,7 @@
 
 ## すぐに使う
 
-1. [公開Webアプリ](https://uchimanajet7.github.io/annoforge/)を開きます。
+1. [AnnoForge](https://uchimanajet7.github.io/annoforge/)を開きます。
 2. 「画像を選択」、またはキャンバスへのドラッグ&ドロップで画像を読み込みます。
 3. 図形ツールで注釈を描きます。修正するときは選択ツールへ切り替えます。重なって選べない図形は「アノテーション一覧」から選択できます。
 4. 「注釈付き画像を保存」でPNGを、「JSON形式」欄のダウンロードボタンでJSONを保存します。ブラウザーのダウンロード一覧で保存完了を確認してください。
