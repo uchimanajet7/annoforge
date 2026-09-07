@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">AnnoForge：画像と注釈</title>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#2563eb"/>
+  <rect x="12" y="19" width="34" height="31" rx="3" fill="none" stroke="#ffffff" stroke-width="4"/>
+  <path d="M13 43L24 32L34 42L40 36L45 41" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+  <rect x="28" y="8" width="28" height="28" rx="2" fill="#2563eb"/>
+  <rect x="33" y="13" width="18" height="18" fill="#3498db" stroke="#ffffff" stroke-width="4"/>
+  <g fill="#ffffff">
+    <rect x="29" y="9" width="7" height="7" rx="1"/>
+    <rect x="48" y="9" width="7" height="7" rx="1"/>
+    <rect x="29" y="28" width="7" height="7" rx="1"/>
+    <rect x="48" y="28" width="7" height="7" rx="1"/>
+  </g>
+</svg>

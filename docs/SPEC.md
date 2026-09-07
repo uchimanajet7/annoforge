@@ -74,6 +74,13 @@
 - 太さ: 既定5px。JSON の `thickness` に元画像座標系の px として反映。
 - HiDPI: KonvaのpixelRatioデフォルト活用。
 
+#### サイトアイコンと共有画像
+- サイトアイコンは、青い角丸の背景に白い画像枠と山形、右上に水色の注釈領域と白い編集ハンドルを重ねた図案とする。背景は `#2563eb`、注釈領域は `#3498db`、線とハンドルは白とする。
+- `web/favicon.svg` を `rel="icon"`、`type="image/svg+xml"`、`sizes="any"` で指定する。ページからの相対参照で、GitHub Pages の `/annoforge/` 配下とローカルファイルの両方で解決する。
+- OGP は 1200×630 の青い背景に、同じアイコンのモチーフと「AnnoForge」を中央配置する。編集元を `web/ogp.svg`、共有用画像を `web/ogp.png` とする。
+- OGP と Twitter Card の画像は公開サイトの `https://uchimanajet7.github.io/annoforge/ogp.png` を参照し、画像内容を表す代替テキストを付ける。
+- 技術的な根拠: [MDN の icon リンク](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/rel#icon)、[Open Graph の画像 URL・寸法・代替テキスト](https://ogp.me/#structured)（2026-09-07確認）。
+
 ### 3.4.1 注釈付き PNG の出力契約
 - 出力範囲は元画像の境界に固定し、PNG のピクセル寸法は元画像の `naturalWidth × naturalHeight` と完全に一致させる。表示用ステージの余白は含めない。
 - 元画像座標系の確定済み `shapes[]` を正本として、画像と注釈だけを出力専用シーンへ再構成する。`thickness` は元画像座標系の px として描画する。
