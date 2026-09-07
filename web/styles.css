@@ -81,10 +81,13 @@ h2 {
 }
 .color-swatch.active { outline: 2px solid #3498db; outline-offset: 2px; }
 .color-swatch:focus-visible { outline: 3px solid #2c3e50; outline-offset: 2px; }
-.file-controls { display: flex; align-items: center; gap: 6px; }
+.file-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .file-label { font-size: 0.9rem; color: #2c3e50; }
 .file-pick-btn { background: #fff; color: #2c3e50; border: 1px solid #ccc; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
 .file-pick-btn:hover { background: #f5f7fa; }
+.file-pick-btn:focus-visible, .image-dialog :focus-visible { outline: 3px solid #2c3e50; outline-offset: 2px; }
+.image-file-loading:not([hidden]) { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.image-file-loading { font-size: 0.9rem; }
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 
 .controls .tool-group {
@@ -339,6 +342,7 @@ button:hover {
 .image-name {
   margin-left: 8px;
   max-width: 320px;
+  min-width: 0;
   color: #2c3e50;
   font-size: 0.9rem;
   white-space: nowrap;
@@ -372,6 +376,17 @@ button:hover {
 }
 
 /* モーダル */
+.image-dialog { margin: auto; width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; border: 1px solid #ccc; border-radius: 8px; color: #333; background: #fff; }
+.image-dialog::backdrop { background: rgba(0,0,0,0.4); }
+.image-dialog h2 { margin: 0; }
+.image-dialog .modal__footer { flex-wrap: wrap; }
+.image-dialog label { display: block; }
+.image-dialog input { width: 100%; font: inherit; padding: 8px; border: 1px solid #777; border-radius: 4px; }
+.image-dialog p { overflow-wrap: anywhere; }
+.image-dialog-help { margin-top: 8px; color: #555; font-size: 0.9rem; }
+.image-dialog-warning { margin-top: 12px; font-weight: bold; }
+.image-dialog [role="status"], .image-dialog [role="alert"] { margin-top: 8px; }
+.image-dialog button:disabled { cursor: wait; opacity: 0.65; }
 .modal { display: none; }
 .modal.show { display: block; }
 .modal .modal__overlay {

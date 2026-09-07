@@ -1,6 +1,6 @@
 # ローカル開発セットアップ
 
-本書は、CI と同じ ShellCheck、Terraform の fmt/validate、WebMCP受信処理のJavaScript検査・テストをローカルで実行するためのセットアップを示します。
+本書は、CI と同じ ShellCheck、Terraform の fmt/validate、画像読込みとWebMCP受信処理のJavaScript検査・テストをローカルで実行するためのセットアップを示します。
 
 本書のコマンド例は、原則としてリポジトリルートでの実行を前提とします。
 
@@ -33,7 +33,7 @@ brew install awscli jq
 - AWS CLI: v2。任意です。デプロイで使います。
 - Python: 3.13。Pillow Layer のローカル生成で使います。該当作業を行わない場合は任意です。
 - jq: 1.6。任意です。スモーク時の JSON 整形で使います。
-- Node.js: 22.2以上。WebMCPのファイル受信モジュールとそのテストを使う場合だけ必要です。標準モジュールだけを使うため、`npm install` は不要です。CIではNode.js 24を使用します。通常のWeb UIには不要です。
+- Node.js: 22.2以上。JavaScriptの検査・テスト、またはWebMCPのファイル受信モジュールを使う場合だけ必要です。標準モジュールだけを使うため、`npm install` は不要です。CIではNode.js 24を使用します。通常のWeb UIには不要です。
 
 ### 任意: 一括セットアップ
 ```
@@ -55,7 +55,7 @@ Homebrew のインストールとシェル設定は公式手順を参照して�
 shellcheck --version
 terraform -version
 aws --version   # 任意
-node --version  # WebMCPの受信処理・テストを行う場合
+node --version  # JavaScriptの検査・テストやWebMCPの受信処理を行う場合
 ```
 ```
 bash scripts/tools/check_updates.sh   # 任意: 最新差分を確認
@@ -111,15 +111,24 @@ bash scripts/tools/web/start-local-web.sh
 
 ## 4) CI と同じチェックをローカルで実行
 
-- WebMCPの受信処理。追加パッケージなしで構文検査とNode.js標準テストを実行します。
+- 画像読込みとWebMCPの受信処理。追加パッケージなしで構文検査とNode.js標準テストを実行します。
 
 ```bash
 node --check web/app.js
+node --check web/image-loading.js
 node --check scripts/tools/web/receive-annotation-export.mjs
-node --test tests/webmcp-export.test.mjs
+node --test tests/image-loading.test.mjs tests/webmcp-export.test.mjs
 ```
 
 テストは小さいPNG・JSON、分割取得が必要な13 MiBのPNG、破損・版不一致・不正入力・上書き防止・後処理、検証済み実ファイルへの画像・ファイルリンク生成を検証します。テスト用ファイルは実行環境の一時領域に一意なディレクトリを作り、終了後にそのテストが作成したディレクトリだけを削除します。一時領域を明示する場合は、`ANNOFORGE_TEST_TMP_DIR` に許可されたディレクトリの絶対パスを指定します。モックを使う受信単体テストであり、実ブラウザーのWebMCP接続と最終回答への画像表示は3.5の経路で別途確認します。
+
+画像読込みのテストは、実際の共通モジュールをブラウザーAPIのモックと接続し、URLの許可、応答・容量・デコードエラー、取消し、作業版の変更、URL/Data URL/ファイルの全組合せでの旧処理の無効化、一時URLの解放を検証します。実画像のデコード・CORS・UI操作を証明するものではないため、ブラウザーでは次も確認します。
+
+1. WebMCPを使わず、URL入力から画像を開き、図形を編集してPNG・JSONを保存する。ファイル選択とドロップでも同じ結果を確認する。
+2. 注釈がある場合だけ消去確認が表示され、取消し・失敗で画像、注釈、選択が残る。確認中にWebMCPから編集した場合は再確認となる。
+3. 読込み中に他経路の画像読込みや注釈編集を行い、旧結果が後から反映されないことを確認する。入力を開くだけ・無効URLの入力だけでは進行中の有効な読込みを止めない。
+4. URL入力内のEnterが作図中の多角形を確定せず、Escapeで閉じるとフォーカスが起動ボタンへ戻る。デスクトップ・狭幅で入力と操作ボタンが画面内に収まる。
+5. UIで読み込んだ画像をWebMCPで取得・編集し、逆方向でも同じ状態が見えることと、3.5のPNG/JSON直接受信を確認する。
 
 - Shell/Bash。警告もエラー扱いです。CI と同条件です。
 ```
@@ -144,8 +153,9 @@ bash scripts/tools/lint_shell.sh --strict \
   && bash scripts/tools/fmt_terraform.sh --check \
   && bash scripts/tools/fmt_terraform.sh --validate \
   && node --check web/app.js \
+  && node --check web/image-loading.js \
   && node --check scripts/tools/web/receive-annotation-export.mjs \
-  && node --test tests/webmcp-export.test.mjs
+  && node --test tests/image-loading.test.mjs tests/webmcp-export.test.mjs
 ```
 
 ## 5) よくあるつまずき
@@ -169,7 +179,7 @@ bash scripts/tools/lint_shell.sh --strict \
 - ローカル/CI 共通スクリプト: `scripts/tools/`
   - `lint_shell.sh` は ShellCheck、`fmt_terraform.sh` は Terraform の整形と検証です。
 - CI はこれらを呼ぶだけです。push のときだけ `terraform fmt` を自動適用し、bot がコミットします。
-- WebMCP受信処理のCIジョブは、Node.js 24で構文検査と単体テストを行います。権限は `contents: read`、パッケージのインストール・キャッシュは不要です。
+- Web UIとWebMCPのCIジョブは、Node.js 24で構文検査と単体テストを行います。権限は `contents: read`、パッケージのインストール・キャッシュは不要です。
 - Terraform は GitHub Actions では `hashicorp/setup-terraform@v4` を使用して固定版を導入します。
 - 出力とカラー方針は `docs/SPEC.md` に明記しています。CI は無色で、UI 側で色付けします。
 - 方針: CI 相当チェックは `docs/SPEC.md` の CI ポリシーに従います。

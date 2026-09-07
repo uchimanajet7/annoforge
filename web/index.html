@@ -36,8 +36,13 @@
       <div class="file-controls" role="group" aria-label="画像の読み込み">
         <label for="imageInput" class="file-label">画像:</label>
         <button id="openFileBtn" type="button" class="file-pick-btn" aria-label="画像を選択">画像を選択</button>
+        <button id="openImageUrlBtn" type="button" class="file-pick-btn">URLから画像を開く</button>
         <input type="file" id="imageInput" accept="image/*" class="visually-hidden">
         <span id="imageNameTop" class="image-name" aria-live="polite" title=""></span>
+        <span id="imageFileLoading" class="image-file-loading" hidden>
+          <span role="status">画像を読み込み中…</span>
+          <button id="cancelImageFileBtn" type="button" class="file-pick-btn">キャンセル</button>
+        </span>
       </div>
       <div class="global-actions" role="group" aria-label="出力と状態">
         <button id="downloadImageBtn">注釈付き画像を保存</button>
@@ -145,6 +150,33 @@
     </footer>
   </div>
   
+  <dialog id="imageUrlDialog" class="image-dialog" aria-labelledby="imageUrlTitle">
+    <form id="imageUrlForm">
+      <div class="modal__header"><h2 id="imageUrlTitle">URLから画像を開く</h2></div>
+      <div class="modal__body">
+        <label for="imageUrlInput">画像URL</label>
+        <input id="imageUrlInput" name="imageUrl" type="url" required autofocus autocomplete="off" spellcheck="false" aria-describedby="imageUrlHelp imageUrlWarning imageUrlError">
+        <p id="imageUrlHelp" class="image-dialog-help">HTTPSの画像URL（PNG・JPEG・WebP、12 MiB以下）を指定してください。別サイトの画像には配信元のCORS許可が必要です。</p>
+        <p id="imageUrlWarning" class="image-dialog-warning" hidden></p>
+        <p id="imageUrlStatus" role="status"></p>
+        <p id="imageUrlError" role="alert"></p>
+      </div>
+      <div class="modal__footer">
+        <button id="submitImageUrlBtn" type="submit">開く</button>
+        <button id="cancelImageUrlBtn" type="button" class="secondary">キャンセル</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="imageReplaceDialog" class="image-dialog" aria-labelledby="imageReplaceTitle" aria-describedby="imageReplaceMessage">
+    <form id="imageReplaceForm">
+      <div class="modal__header"><h2 id="imageReplaceTitle">画像を開く</h2></div>
+      <div class="modal__body"><p id="imageReplaceMessage"></p></div>
+      <div class="modal__footer">
+        <button type="submit">注釈を破棄して開く</button>
+        <button id="cancelImageReplaceBtn" type="button" class="secondary" autofocus>キャンセル</button>
+      </div>
+    </form>
+  </dialog>
   <!-- インポートモーダル -->
   <div id="importModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle" aria-hidden="true">
     <div class="modal__overlay" data-close-modal></div>
@@ -190,6 +222,7 @@
   </div>
   <!-- Konva.js（固定バージョン） -->
   <script src="https://unpkg.com/konva@10.3.2/konva.min.js"></script>
+  <script src="image-loading.js"></script>
   <script src="app.js"></script>
 </body>
 

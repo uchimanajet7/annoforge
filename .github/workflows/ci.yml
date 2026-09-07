@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   webmcp-export:
-    name: WebMCP export receiver
+    name: Web UI and WebMCP
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,10 +29,11 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check web/app.js
+          node --check web/image-loading.js
           node --check scripts/tools/web/receive-annotation-export.mjs
 
-      - name: Test export receiver
-        run: node --test tests/webmcp-export.test.mjs
+      - name: Test image loading and export receiver
+        run: node --test tests/image-loading.test.mjs tests/webmcp-export.test.mjs
 
   shellcheck:
     name: ShellCheck (scripts/**/*.sh)

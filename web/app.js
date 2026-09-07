@@ -3,6 +3,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM参照
   const imageInput = document.getElementById('imageInput');
   const openFileBtn = document.getElementById('openFileBtn');
+  const openImageUrlBtn = document.getElementById('openImageUrlBtn');
+  const imageUrlDialog = document.getElementById('imageUrlDialog');
+  const imageUrlForm = document.getElementById('imageUrlForm');
+  const imageUrlInput = document.getElementById('imageUrlInput');
+  const imageUrlWarning = document.getElementById('imageUrlWarning');
+  const imageUrlStatus = document.getElementById('imageUrlStatus');
+  const imageUrlError = document.getElementById('imageUrlError');
+  const submitImageUrlBtn = document.getElementById('submitImageUrlBtn');
+  const imageReplaceDialog = document.getElementById('imageReplaceDialog');
+  const imageReplaceMessage = document.getElementById('imageReplaceMessage');
+  const imageFileLoading = document.getElementById('imageFileLoading');
   const clearBtn = document.getElementById('clearBtn');
   const copyJsonBtn = document.getElementById('copyJsonBtn');
   const zoomInBtn = document.getElementById('zoomInBtn');
@@ -108,14 +119,18 @@ document.addEventListener('DOMContentLoaded', () => {
   let preparedAnnotationExport = null;
   const WEBMCP_EXPORT_CHUNK_BYTES = 256 * 1024;
   const WEBMCP_EXPORT_MAX_CHUNK_BYTES = 1024 * 1024;
-  const WEBMCP_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-  const WEBMCP_MAX_DATA_URL_LENGTH = 12 * 1024 * 1024;
+  const WEBMCP_MAX_DATA_URL_LENGTH = AnnoForgeImageLoading.MAX_DATA_URL_LENGTH;
   const WEBMCP_PREVIEW_DEFAULT_MAX_DIMENSION = 1024;
   const WEBMCP_PREVIEW_MIN_DIMENSION = 64;
   const WEBMCP_PREVIEW_MAX_DIMENSION = 2048;
-  const WEBMCP_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
   const DOWNLOAD_OBJECT_URL_RELEASE_DELAY_MS = 1000;
   const DOWNLOAD_REQUESTED_MESSAGE = 'ブラウザーにダウンロードを要求しました。完了状態はダウンロード一覧で確認してください';
+  const IMAGE_REPLACEMENT_WARNING = '画像を開くと、現在の注釈と作図中の図形を破棄します。この操作は元に戻せません。';
+  const imageLoader = AnnoForgeImageLoading.createLoader({ getVersion: getImageLoadVersion, commitImage: commitLoadedImage });
+  let urlLoadController = null;
+  let fileLoadController = null;
+  let urlDialogVersion = null;
+  let pendingImageReplacement = null;
 
   function advanceWorkspaceRevision() {
     workspaceRevision += 1;
@@ -248,6 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
     copyJsonBtn.addEventListener('click', copyAllAnnotations);
     bindDragAndDrop();
     bindImportModal();
+    bindImageLoading();
     // ツールボタン
     toolButtons().forEach(btn => {
       btn.addEventListener('click', () => setCurrentTool(btn.getAttribute('data-tool')));
@@ -265,6 +281,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (draft && draft.type === 'polygon') finalizePolygon();
     });
     window.addEventListener('keydown', (e) => {
+      if (e.defaultPrevented || e.isComposing || isModalOpen() || imageUrlDialog.open || imageReplaceDialog.open ||
+          e.target?.closest?.('input, textarea, select, button, [contenteditable]:not([contenteditable="false"])')) return;
       if (e.key === 'Escape') return;
       if (e.key === 'Enter' && draft && draft.type === 'polygon') finalizePolygon();
     });
@@ -469,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
       y: stage.height() / 2 - 10,
       width: stage.width(),
       align: 'center',
-      text: '画像をアップロードしてください',
+      text: '画像を開いてください',
       fontSize: 20,
       fill: '#999'
     });
@@ -477,66 +495,159 @@ document.addEventListener('DOMContentLoaded', () => {
     imageLayer.draw();
   }
 
+  // 画像の反映前には、確定済み注釈だけでなく作図・変形途中の変更も検出する。
+  function getImageLoadVersion() {
+    return JSON.stringify({
+      revision: workspaceRevision,
+      draft: draft ? { type: draft.type, start: draft.start, points: draft.points, attributes: draft.node.getAttrs() } : null,
+      transforming: !!transformer?.isTransforming()
+    });
+  }
+
+  function hasImageReplacementWork() { return shapes.length > 0 || !!draft; }
+
+  function updateUrlReplacementWarning() {
+    urlDialogVersion = getImageLoadVersion();
+    const hasWork = hasImageReplacementWork();
+    imageUrlWarning.hidden = !hasWork;
+    imageUrlWarning.textContent = hasWork ? IMAGE_REPLACEMENT_WARNING : '';
+    submitImageUrlBtn.textContent = hasWork ? '注釈を破棄して開く' : '開く';
+  }
+
+  function setUrlLoading(busy) {
+    imageUrlInput.disabled = busy;
+    submitImageUrlBtn.disabled = busy;
+    imageUrlForm.setAttribute('aria-busy', String(busy));
+    imageUrlStatus.textContent = busy ? '画像を読み込み中…' : '';
+  }
+
+  function closeImageUrlDialog() {
+    urlLoadController?.abort();
+    urlLoadController = null;
+    imageUrlDialog.close();
+    imageUrlForm.reset();
+    setUrlLoading(false);
+  }
+
+  function finishImageReplacement(confirmed) {
+    const pending = pendingImageReplacement;
+    pendingImageReplacement = null;
+    imageReplaceDialog.close();
+    pending?.resolve(confirmed);
+  }
+
+  function confirmImageReplacement(file) {
+    return new Promise(resolve => {
+      pendingImageReplacement?.resolve(false);
+      pendingImageReplacement = { resolve, file, version: getImageLoadVersion() };
+      imageReplaceMessage.textContent = `${file.name || '画像ファイル'} を開きます。${IMAGE_REPLACEMENT_WARNING}`;
+      if (!imageReplaceDialog.open) imageReplaceDialog.showModal();
+    });
+  }
+
+  function bindImageLoading() {
+    openImageUrlBtn.addEventListener('click', () => {
+      imageUrlError.textContent = '';
+      imageUrlInput.removeAttribute('aria-invalid');
+      updateUrlReplacementWarning();
+      imageUrlDialog.showModal();
+    });
+    document.getElementById('cancelImageUrlBtn').addEventListener('click', closeImageUrlDialog);
+    imageUrlDialog.addEventListener('cancel', e => { e.preventDefault(); closeImageUrlDialog(); });
+    imageUrlInput.addEventListener('input', () => {
+      imageUrlError.textContent = '';
+      imageUrlInput.removeAttribute('aria-invalid');
+    });
+    imageUrlForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (urlLoadController) return;
+      imageUrlError.textContent = '';
+      let url;
+      try { url = AnnoForgeImageLoading.parseImageUrl(imageUrlInput.value); }
+      catch (error) {
+        imageUrlError.textContent = error.message;
+        imageUrlInput.setAttribute('aria-invalid', 'true');
+        imageUrlInput.focus();
+        return;
+      }
+      if (urlDialogVersion !== getImageLoadVersion() && hasImageReplacementWork()) {
+        updateUrlReplacementWarning();
+        imageUrlError.textContent = '作業内容が変更されています。注釈を破棄して開くか、もう一度確認してください。';
+        return;
+      }
+      const controller = new AbortController();
+      urlLoadController = controller;
+      setUrlLoading(true);
+      try {
+        await imageLoader.load({ kind: 'url', value: url.href }, { signal: controller.signal });
+        if (urlLoadController === controller) closeImageUrlDialog();
+      } catch (error) {
+        if (urlLoadController === controller) {
+          imageUrlError.textContent = error.message || '画像の読み込みに失敗しました';
+          updateUrlReplacementWarning();
+        }
+      } finally {
+        if (urlLoadController === controller) {
+          urlLoadController = null;
+          setUrlLoading(false);
+          imageUrlInput.focus();
+        }
+      }
+    });
+    document.getElementById('imageReplaceForm').addEventListener('submit', e => {
+      e.preventDefault();
+      if (!pendingImageReplacement) return;
+      const version = getImageLoadVersion();
+      if (pendingImageReplacement.version !== version && hasImageReplacementWork()) {
+        pendingImageReplacement.version = version;
+        imageReplaceMessage.textContent = `作業内容が変更されています。${pendingImageReplacement.file.name || '画像ファイル'} を開くか、もう一度確認してください。${IMAGE_REPLACEMENT_WARNING}`;
+        return;
+      }
+      finishImageReplacement(version);
+    });
+    document.getElementById('cancelImageReplaceBtn').addEventListener('click', () => finishImageReplacement(false));
+    imageReplaceDialog.addEventListener('cancel', e => { e.preventDefault(); finishImageReplacement(false); });
+    document.getElementById('cancelImageFileBtn').addEventListener('click', () => fileLoadController?.abort());
+    window.addEventListener('pagehide', () => {
+      imageLoader.cancel();
+      closeImageUrlDialog();
+      finishImageReplacement(false);
+    });
+  }
+
   // 画像アップロード処理（ファイル入力）
   function handleImageUpload(e) {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
     loadImageFile(file);
   }
 
-  // 画像アップロード処理（D&D/共通）
-  function loadImageFile(file) {
+  // 取消し後にも同じファイルを選び直せるよう、ファイル入力は選択ごとにリセットする。
+  async function loadImageFile(file) {
     if (!file || !((file.type || '').startsWith('image/'))) return;
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const image = await decodeImageSource(event.target.result);
-        commitLoadedImage(image, file.name || '');
-      } catch (error) {
-        console.error('画像の読み込みに失敗しました:', error);
-        showNotification('画像の読み込みに失敗しました', 'error');
+    let version = getImageLoadVersion();
+    if (hasImageReplacementWork()) {
+      version = await confirmImageReplacement(file);
+      if (version === false) return;
+    }
+    const controller = new AbortController();
+    fileLoadController = controller;
+    imageFileLoading.hidden = false;
+    try {
+      await imageLoader.load({ kind: 'file', value: file }, { expectedVersion: version, signal: controller.signal });
+    } catch (error) {
+      if (fileLoadController === controller) showNotification(error.message || '画像の読み込みに失敗しました', error.name === 'AbortError' ? undefined : 'error');
+    } finally {
+      if (fileLoadController === controller) {
+        fileLoadController = null;
+        imageFileLoading.hidden = true;
       }
-    };
-    reader.onerror = () => showNotification('画像の読み込みに失敗しました', 'error');
-    reader.readAsDataURL(file);
-  }
-
-  function decodeImageSource(source, signal) {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-      let settled = false;
-
-      const cleanup = () => {
-        image.onload = null;
-        image.onerror = null;
-        if (signal) signal.removeEventListener('abort', onAbort);
-      };
-      const finish = (callback, value) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        callback(value);
-      };
-      const onAbort = () => {
-        image.src = '';
-        const reason = signal && signal.reason;
-        finish(reject, reason instanceof Error ? reason : new DOMException('画像の読み込みがキャンセルされました', 'AbortError'));
-      };
-
-      image.onload = () => finish(resolve, image);
-      image.onerror = () => finish(reject, new Error('取得したデータを画像としてデコードできません'));
-      if (signal) {
-        if (signal.aborted) {
-          onAbort();
-          return;
-        }
-        signal.addEventListener('abort', onAbort, { once: true });
-      }
-      image.src = source;
-    });
+    }
   }
 
   function commitLoadedImage(image, imageName) {
+    if (transformer?.isTransforming()) throw new Error('図形を変形中のため画像を開きませんでした。編集を終えてから、もう一度実行してください');
     loadedImage = image;
     loadedImageName = imageName;
     placeImage();
@@ -547,6 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setCurrentTool('select', { announce: false });
     updateImageNameUI();
     showNotification(loadedImageName ? `${loadedImageName} を読み込みました` : '画像を読み込みました');
+    return { loaded: true, revision: workspaceRevision, image: { originalWidth: image.naturalWidth, originalHeight: image.naturalHeight } };
   }
 
   // 画像名のUI更新
@@ -1254,144 +1366,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return {
       expectedRevision: input.expectedRevision,
-      url: parseAllowedWebMcpImageUrl(input.url.trim())
+      url: AnnoForgeImageLoading.parseImageUrl(input.url).href
     };
-  }
-
-  function parseAllowedWebMcpImageUrl(value) {
-    let parsed;
-    try {
-      parsed = new URL(value);
-    } catch {
-      throw new TypeError('input.url は有効な絶対URLである必要があります');
-    }
-
-    if (parsed.username || parsed.password) {
-      throw new TypeError('input.url にユーザー名またはパスワードを含めることはできません');
-    }
-    if (parsed.protocol === 'https:') return parsed;
-
-    const pageUrl = new URL(window.location.href);
-    if (
-      parsed.protocol === 'http:' &&
-      pageUrl.protocol === 'http:' &&
-      isLoopbackHostname(pageUrl.hostname) &&
-      parsed.origin === pageUrl.origin
-    ) {
-      return parsed;
-    }
-
-    throw new TypeError('input.url はHTTPS、または現在のloopbackページと同一オリジンのHTTP URLである必要があります');
-  }
-
-  function isLoopbackHostname(hostname) {
-    const normalized = String(hostname || '').toLowerCase();
-    return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '[::1]' || normalized === '::1';
   }
 
   async function openWebMcpImageFromUrl(openInput, signal) {
     assertCurrentWorkspaceRevision(openInput.expectedRevision);
     throwIfWebMcpExecutionAborted(signal);
-
-    let response;
-    try {
-      response = await fetch(openInput.url.href, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'omit',
-        referrerPolicy: 'no-referrer',
-        cache: 'no-store',
-        signal
-      });
-    } catch (error) {
-      throwIfWebMcpExecutionAborted(signal);
-      throw new Error('画像URLを取得できません。URL、ネットワーク、または配信元のCORS設定を確認してください');
-    }
-
-    if (!response.ok) {
-      throw new Error(`画像URLの取得に失敗しました（HTTP ${response.status}）`);
-    }
-    parseAllowedWebMcpImageUrl(response.url || openInput.url.href);
-
-    const contentType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
-    if (!WEBMCP_IMAGE_MIME_TYPES.has(contentType)) {
-      throw new TypeError('画像URLのContent-Typeはimage/png、image/jpeg、image/webpのいずれかである必要があります');
-    }
-
-    const contentLength = Number(response.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > WEBMCP_MAX_IMAGE_BYTES) {
-      throw new RangeError('画像URLのデータは12 MiB以下である必要があります');
-    }
-
-    const blob = await response.blob();
-    throwIfWebMcpExecutionAborted(signal);
-    if (blob.size === 0) throw new TypeError('画像URLから空のデータが返されました');
-    if (blob.size > WEBMCP_MAX_IMAGE_BYTES) throw new RangeError('画像URLのデータは12 MiB以下である必要があります');
-
-    const objectUrl = URL.createObjectURL(blob);
-    try {
-      const image = await decodeImageSource(objectUrl, signal);
-      throwIfWebMcpExecutionAborted(signal);
-      assertCurrentWorkspaceRevision(openInput.expectedRevision);
-      commitLoadedImage(image, '');
-      return {
-        loaded: true,
-        revision: workspaceRevision,
-        image: {
-          originalWidth: image.naturalWidth,
-          originalHeight: image.naturalHeight
-        }
-      };
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
+    return imageLoader.load({ kind: 'url', value: openInput.url }, { signal });
   }
 
   function validateWebMcpDataUrlImageInput(input) {
     assertWebMcpObject(input, 'input');
     assertWebMcpExactKeys(input, ['expectedRevision', 'dataUrl'], 'input');
     assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
-    if (typeof input.dataUrl !== 'string' || input.dataUrl.length === 0) {
-      throw new TypeError('input.dataUrl は空でないData URL文字列である必要があります');
-    }
-    if (input.dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
-      throw new RangeError('input.dataUrl は12 MiB以下である必要があります');
-    }
-
-    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]*={0,2})$/.exec(input.dataUrl);
-    if (!match) {
-      throw new TypeError('input.dataUrl はPNG、JPEG、WebPのbase64 Data URLである必要があります');
-    }
-
-    let decodedLength;
-    try {
-      decodedLength = atob(match[2]).length;
-    } catch {
-      throw new TypeError('input.dataUrl のbase64データが不正です');
-    }
-    if (decodedLength === 0) throw new TypeError('input.dataUrl の画像データが空です');
-    if (decodedLength > WEBMCP_MAX_IMAGE_BYTES) {
-      throw new RangeError('input.dataUrl の画像データは12 MiB以下である必要があります');
-    }
-
+    // 画像の形式・容量・デコードはUIと共通の読込み処理で検証する。
     return input;
   }
 
   async function openWebMcpImageFromDataUrl(openInput, signal) {
     assertCurrentWorkspaceRevision(openInput.expectedRevision);
     throwIfWebMcpExecutionAborted(signal);
-    const image = await decodeImageSource(openInput.dataUrl, signal);
-    throwIfWebMcpExecutionAborted(signal);
-    assertCurrentWorkspaceRevision(openInput.expectedRevision);
-    commitLoadedImage(image, '');
-    return {
-      loaded: true,
-      revision: workspaceRevision,
-      image: {
-        originalWidth: image.naturalWidth,
-        originalHeight: image.naturalHeight
-      }
-    };
+    return imageLoader.load({ kind: 'data_url', value: openInput.dataUrl }, { signal });
   }
 
   function validateWebMcpAnnotationDocument(input) {
@@ -1755,7 +1751,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'open_image_from_url',
         title: 'URLから画像を開く',
-        description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、HTTPS URL（クロスオリジンの場合は配信元のCORS許可が必要）または同一オリジンのloopback HTTP URLから開きます。成功時は既存アノテーションを消去します。',
+        description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、HTTPS URL（クロスオリジンの場合は配信元のCORS許可が必要）または同一オリジンのloopback HTTP URLから開きます。成功時は既存アノテーションと作図中の図形を消去します。',
         inputSchema: urlImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -1771,7 +1767,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await document.modelContext.registerTool({
         name: 'open_image_from_data_url',
         title: 'Data URLから画像を開く',
-        description: '現在の版が expectedRevision と一致する場合だけ、呼び出し側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。会話の添付ファイルを直接読み取る機能ではありません。成功時は既存アノテーションを消去します。',
+        description: '現在の版が expectedRevision と一致する場合だけ、呼び出し側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。会話の添付ファイルを直接読み取る機能ではありません。成功時は既存アノテーションと作図中の図形を消去します。',
         inputSchema: dataUrlImageInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -2175,7 +2171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
       throw new RangeError('注釈付き画像のData URLが12 MiBを超えています。prepare_annotation_exportとread_annotation_exportで分割取得するか、保存完了を確認できるクライアントでdownloadを使用してください');
     }
-    const image = await decodeImageSource(dataUrl, signal);
+    const image = await AnnoForgeImageLoading.decodeImage(dataUrl, signal);
     assertDecodedImageSize(image, width, height, '注釈付き画像');
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== revision) {
@@ -2199,7 +2195,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
       throw new RangeError('画像プレビューのData URLが12 MiBを超えています。maxDimensionを小さくしてください');
     }
-    const image = await decodeImageSource(dataUrl, signal);
+    const image = await AnnoForgeImageLoading.decodeImage(dataUrl, signal);
     assertDecodedImageSize(image, width, height, '画像プレビュー');
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== revision) {
