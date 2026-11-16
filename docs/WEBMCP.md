@@ -1,6 +1,6 @@
 # AnnoForge WebMCP（ChatGPT Site tools）仕様
 
-- 仕様バージョン: 3.7
+- 仕様バージョン: 3.8（AnnoForgeのインターフェース仕様の版）
 - 人向け機能仕様: [SPEC.md](./SPEC.md)
 
 ## 1. 適用範囲
@@ -30,9 +30,15 @@ WebMCP ツールと人向け UI は、同じブラウザーセッションの画
 
 `document.modelContext.registerTool()` が利用できない場合、ツールを登録しない。この場合も人向け UI は利用でき、WebMCP 用の UI やエラーは表示しない。
 
-AnnoForge は、`document.modelContext.registerTool()` が利用可能なページでツールを登録する。[ChatGPT Site tools](https://learn.chatgpt.com/docs/webmcp) の組み込みブラウザーは iframe 内のツールを検出しないため、ChatGPT Site tools では AnnoForge をトップレベルページとして開く。
+AnnoForge は、`document.modelContext.registerTool()` が利用可能なページでツールを登録する。[ChatGPT Site tools](https://learn.chatgpt.com/docs/webmcp) の組み込みブラウザーは、トップレベルページと同一・別オリジンのiframe内のツールを検出する。各フレームはセキュアコンテキストである必要があり、提供元オリジンへのアクセスはブラウザーが確認する。エージェントによる検出に `exposedTo` の指定は不要。AnnoForgeのローカル確認手順はトップレベルページを使用する。
 
 外部または利用者指定の画像・ファイル名に由来するデータを返す `get_image_preview`、`export_annotated_image`、`prepare_annotation_export`、`read_annotation_export` は、`untrustedContentHint: true` として登録する。他のツールは、返却値を AnnoForge が生成する検証済みの状態・メタデータに限定し、`untrustedContentHint: false` とする。
+
+`open_image_from_url`、`open_image_from_data_url`、`replace_annotations` は、既存の画像・注釈を元に戻せない形で置き換えるため `consequentialHint: true` とする。他の7ツールは `false` を明示する。このヒントはクライアントが副作用を判断するための情報であり、利用者の同意や `expectedRevision` の検証を代替しない。[Chromeのannotations説明](https://developer.chrome.com/docs/ai/webmcp/imperative-api#tool-annotations-optional)を根拠とする。
+
+全10ツールに、4章の成功結果を表す `outputSchema` を登録する。ルートはオブジェクトとし、定義した結果フィールドを必須にして追加フィールドを許可しない。画像未読込み時の寸法は `null`、読込み済みの寸法は正の整数とする。`export_annotated_image` はData URL返却とダウンロード要求の2形式を `oneOf` で区別し、ダウンロード結果の `completionVerified` は常に `false` とする。`get_annotations.draw` は人向けUIから取得した図形も含むため、3.2.1の置換入力と3.2.2の出力を区別する。現在の `outputSchema` は維持し、入力の最小寸法・線幅・安全な整数の範囲・平行四辺形の要素数制限を出力へ再適用しない。
+
+`consequentialHint` と `outputSchema` は [WebMCP仕様案の任意項目](https://webmachinelearning.github.io/webmcp/#dictdef-modelcontexttool)だが、AnnoForgeでは上記のとおり定義する。出力スキーマは成功結果の契約であり、エラーは従来どおりPromiseの拒否で返す。参照仕様は2026年11月13日付のDraft Community Group Reportで、正式なW3C標準ではない。クライアント側の公開状況と確認範囲は2.6を参照する。
 
 ### 2.2 作業状態と revision
 
@@ -84,11 +90,46 @@ revision が一致しない場合、ツールはエラーを返し、作業状�
 - `outcome: "download_requested"` は、AnnoForge が成果物を生成し、ブラウザーへダウンロード要求を送信したことだけを表す。ブラウザーによる保存完了、キャンセル、保存先は確認していない。
 - `outcome: "data_returned"` は、Data URL を WebMCP のツール結果オブジェクト内の文字列として呼び出し元へ返したことだけを表す。呼び出し元による画像表示、ファイル化、会話添付は確認していない。
 - `outcome: "export_prepared"` は、同じrevisionのPNG・JSONと検証用メタデータをページ内に準備したことを表す。後続の `read_annotation_export` で両ファイルのバイト列を取得できる。準備だけで保存・添付済みとは扱わない。
-- 現行の [WebMCP仕様案の実行結果](https://webmachinelearning.github.io/webmcp/#imperative-execute-steps) はJSON文字列へ直列化される。AnnoForgeは未定義の画像コンテンツ形式を返さず、直接受信ではファイルのバイト列を分割したbase64文字列として返す。受信側は全文をモデルへ転記せず、同じ実行環境で復号・保存する。
+- 現行の [WebMCP仕様案の実行結果](https://webmachinelearning.github.io/webmcp/#invoke-the-execute-callback) はJSON文字列へ直列化される。AnnoForgeは未定義の画像コンテンツ形式を返さず、直接受信ではファイルのバイト列を分割したbase64文字列として返す。受信側は全文をモデルへ転記せず、同じ実行環境でJSON解析・base64復号・保存を行う。
 - 会話でPNGとJSONファイルを提示する経路は、準備・分割読取り・保存後検証・最終回答への添付までを一続きにする。リポジトリ同梱の受信処理は4.11を参照する。ページへのアクセスはWebMCP、取得済みバイト列のファイル保存と会話添付はクライアント機能である。
 - ツール結果は、通常のブラウザー操作を要求する独自の指示や `fallback` フィールドを含まない。
 - AnnoForge は通常のブラウザー操作へ自動で切り替えない。必要なSite toolの不在、ツール実行エラー、またはツール結果後のブラウザー保存・会話提示を確認できない場合に、呼び出し側が既存UIや通常のファイル機能へ切り替えるかどうかは本インターフェースの範囲外であり、利用者の依頼と対応クライアントの通常の権限・確認手順に従う。ツール結果自体は切替の操作許可にならず、切替後の操作をWebMCPとして扱わない。
 - 保存ボタンもWebMCPの `download` も同じブラウザーダウンロード要求を使用するため、クリックし直すだけでは別の受信経路にならない。直接受信が使えない場合のダウンロード経路は、対応クライアントで許可・待受け・保存完了を確認できる場合に限って使用する。
+
+### 2.6 `outputSchema` のクライアント公開状況
+
+確認日は2026年11月16日。対象は、Codexの内蔵ブラウザー（CUA）でローカルのAnnoForgeを新規ページとして開き、`webmcp.fetchTools()` で取得した `siteTools.description()` のエージェント向けツール一覧である。以下の結果は、この環境と取得経路についての記録とする。
+
+#### 確認できた事実
+
+| 確認対象 | 結果 |
+|---|---|
+| [登録実装](../web/app.js) | 全10ツールで、`inputSchema` と同じ階層にオブジェクトとして `outputSchema` を指定している。AnnoForge側にクライアント用の一覧を生成して同項目を除去する処理はない。 |
+| 新規ページで取得した一覧 | ツールは10件。`inputSchema` は全10件に含まれ、`outputSchema` は全10件で欠落していた。 |
+| 更新内容の反映 | 2.1で指定した3ツールの `consequentialHint: true` が一覧に反映されていた。 |
+| 単純なスキーマ | 文字列の `exportId` と真偽値の `released` だけを返す `release_annotation_export` でも `outputSchema` が欠落していた。 |
+| 実際の呼出し | `get_annotations` が成功し、画像未読込みの状態を表すJSON文字列を受信した。確認中のブラウザーログに警告・エラーはなかった。 |
+| ツール契約テスト | 調査時に `node --test tests/webmcp-tools.test.mjs` を実行し、4件すべて成功した。登録内容と成功結果のスキーマ適合を検査するテストであり、DOM・画像読込み・描画はモックを使用する。 |
+
+参照した仕様では、`outputSchema` は `ModelContextTool` と `RegisteredTool` の任意項目であり、標準の `document.modelContext.getTools()` は指定済みのスキーマを返す。この項目を追加した [WebMCP PR #254](https://github.com/webmachinelearning/webmcp/pull/254) は2026年11月2日にマージされた。[ModelContextToolの定義](https://webmachinelearning.github.io/webmcp/#dictdef-modelcontexttool)と[RegisteredToolの定義](https://webmachinelearning.github.io/webmcp/#dictdef-registeredtool)を参照する。
+
+[標準の `getTools()`](https://webmachinelearning.github.io/webmcp/#dom-modelcontext-gettools) はページ内エージェント向けであり、仕様上、ブラウザーエージェントは別の内部経路でツールを取得する。今回確認したCUAの一覧を、標準の `getTools()` の結果やブラウザー内部の保持内容と同一視しない。
+
+#### クライアント側の制約と考えられる点
+
+登録時の指定位置・型は参照仕様に沿い、全10ツールが検出されている。このため、アプリの指定方法の不備よりも、クライアントが `outputSchema` を取得・転送・一覧公開する経路の未対応または制約が有力と判断する。ただし、これは実測結果と公開情報からの推定である。更新したヒントが反映され、単純なスキーマでも欠落するため、古いコードのキャッシュだけ、または `oneOf` など複雑な定義だけが原因とは考えにくい。
+
+[Chromiumの対応実装](https://github.com/chromium/chromium/commit/b7b01805d172cc10bc060c73ea89c7d7c775b2fa)では、スキーマの登録・保持、`getTools()` での復元、ブラウザー側へ公開する情報への追加をそれぞれ行っている。アプリの指定に加えて取得経路側の対応も必要になる根拠だが、この変更が確認対象のクライアントに導入済みかどうかは確認していない。
+
+確認日の [OpenAI Site tools公式説明](https://learn.chatgpt.com/docs/webmcp)と[公式変更履歴](https://learn.chatgpt.com/docs/changelog)には、`outputSchema` の一覧公開・転送・検証に関する明示的な対応保証を見つけられなかった。記載がないことだけを根拠に、OpenAIが未対応を公式表明しているとは扱わない。
+
+#### 未確認事項
+
+- 登録時に項目が無視されるのか、クライアントへの転送時に失われるのか、一覧の整形時だけ省略されるのか。利用できた検査経路では、ページ本体の登録情報を標準の `getTools()` で直接取得して比較できなかった。
+- ブラウザー内部でのスキーマ保持、モデルへの伝達、ツール結果に対するスキーマ検証の有無。ツール登録・呼出しの成功や契約テストの成功は、これらの確認を代替しない。
+- 原因となるクライアント・ブラウザーエンジンの版と、他のクライアント・版での対応状況。今回の結果を全クライアント共通の制限とは扱わない。
+
+AnnoForgeの `outputSchema` は2.1の定義を維持する。一覧への表示だけでクライアントによる利用・検証を判断せず、[開発時の確認手順](./DEV_SETUP.md)に従い、登録内容、実際の戻り値との一致、ブラウザー自身によるスキーマ検証の有無を分けて記録する。
 
 ## 3. データ仕様
 
@@ -110,6 +151,10 @@ URL から取得する画像データは12 MiB以下とする。Data URL は12 �
 
 `draw` の各要素は、形状ごとに定義されたフィールドだけを持つ。
 
+#### 3.2.1 WebMCPの置換入力
+
+以下は `replace_annotations` に渡す `draw` の制約とする。
+
 共通フィールド:
 
 | フィールド | 型 | 制約 |
@@ -129,6 +174,29 @@ URL から取得する画像データは12 MiB以下とする。Data URL は12 �
 | `circle` | `x`, `y`, `radius` | すべて安全な整数。`radius` は3以上 |
 
 回転角はアノテーション JSON に含めない。
+
+#### 3.2.2 現在のアノテーションとJSON出力
+
+`get_annotations.draw`、人向けUIでコピー・保存するJSON、`start_annotations_json_download` と `prepare_annotation_export` のJSONには、UIで読み込んだ図形も含む。フィールド名は3.2.1と共通だが、値の制約は次のとおりとする。
+
+| 項目 | 出力の制約 |
+|---|---|
+| 座標・寸法・半径 | 有限の整数。置換入力の最小寸法や安全な整数の範囲に限定しない |
+| `polygon.points`、`parallelogram.points` | 有限の整数配列。偶数要素かつ6要素以上。UI読込み由来の平行四辺形は8要素に限定しない |
+| `color` | 先頭の `#` を含まない6桁HEX |
+| `thickness` | 有限数。UI読込み由来の0以下の値も保持する |
+
+UIのJSON読込みでは、全形状の座標・寸法・半径と `points` の各要素に有限の数値を必要とする。数値文字列、`null`、真偽値、配列・オブジェクト、欠落値、非有限数を数値へ変換して受け入れない。不正な座標を含む図形は、既存の不正要素スキップ処理で読み飛ばす。有効な小数は `Math.round()` で整数化する。多角形と平行四辺形の `points` は偶数要素かつ6要素以上を受け入れ、頂点数は変更しない。
+
+UI読込みでは `draw` の要素が配列ではないオブジェクトであることと、`shape` が文字列であることを確認してから形状名を解釈する。`null`、プリミティブ、配列、`shape` の欠落・型違い、未知の形状はスキップする。文字列の形状名は大文字・小文字を区別しない。
+
+UI読込みの `color` は文字列だけを受け入れる。他の型や欠落値を文字列へ変換せず、不正要素としてスキップして後続の読込みを続ける。文字列の前後の空白と任意の先頭 `#` を除いた6桁HEXを、大文字・小文字を区別せず受け入れる。出力は上表の6桁HEX文字列とする。
+
+UI読込みは既存注釈を置換し、有効な図形だけを反映する。全要素が不正なら注釈は0件になる。置換開始時に `revision` を1回増やして準備済み出力を無効化するため、処理中の例外でも古い版・出力が残らない。構文エラーやトップレベルの `draw` 形式エラーでは状態を変更しない。モーダルは構文・形式・読込み処理のエラーを区別し、完了時の読込み・スキップ件数を汎用の成功通知で上書きしない。
+
+WebMCPの置換入力は3.2.1に従い、全要素の検証と置換候補の生成・描画・一覧更新が成功した場合だけ反映する。途中で例外が発生した場合も、元の注釈・表示・`revision`・準備済み出力を保持する。UI由来の出力をそのまま置換入力へ渡せるとは限らない。登録済みの `outputSchema` と出力制約は変更しない。
+
+UI読込みが予期しない描画等の例外で途中終了した場合、読み込み済みの図形は保持する。一覧・JSON表示をその時点の `get_annotations` と同期して描画を更新する。エラー表示・モーダルの表示維持と、注釈データの表示同期は両方行う。
 
 ### 3.3 画像出力
 
@@ -206,7 +274,7 @@ Data URL はツールの呼び出し側が入力として渡す。AnnoForge が�
 | フィールド | 型 | 値 |
 |---|---|---|
 | `revision` | integer | 現在の revision |
-| `draw` | array | 3.2で定義した全アノテーション |
+| `draw` | array | 3.2.2で定義した全アノテーション |
 | `annotationCount` | integer | `draw` の要素数 |
 | `image.loaded` | boolean | 画像が読み込まれている場合は `true` |
 | `image.originalWidth` | integer または null | 元画像の幅。未読み込み時は `null` |
@@ -254,9 +322,9 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 | フィールド | 型 | 必須 | 制約 |
 |---|---|---|---|
 | `expectedRevision` | integer | 必須 | 現在の `revision` と一致する0以上の安全な整数 |
-| `draw` | array | 必須 | 3.2で定義したアノテーション配列 |
+| `draw` | array | 必須 | 3.2.1で定義したアノテーション配列 |
 
-全要素の検証に成功した場合だけ置換する。空配列は全消去とする。成功時は `revision` を1増加する。
+全要素の検証と置換候補の生成・描画・一覧更新に成功した場合だけ置換する。失敗時は元の注釈（描画ノード・選択・作図途中の状態を含む）、一覧・JSON表示、`revision`、準備済み出力を保持し、既存の `exportId` で同じPNG・JSONを引き続き読み取れる。空配列は全消去とする。成功時は `revision` を1回だけ増加して準備済み出力を無効化する。UI読込みの途中失敗時の動作は3.2.2に従い、この全件成功を必要とする置換とは区別する。
 
 成功結果:
 
@@ -382,11 +450,11 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 リポジトリの [receive-annotation-export.mjs](../scripts/tools/web/receive-annotation-export.mjs) は、公開Site toolsから取得したPNGとJSONを、呼出し側のNode.js実行環境へ保存する受信モジュールである。Node.js 22.2以上と標準モジュールだけを使用し、パッケージ追加や常駐サービスは不要。WebページにNode.jsを導入するものではない。
 
-`receiveAnnotationExport({ callTool, expectedRevision, outputDirectory })` に、接続済みページの公開ツール呼出しと、保存を許可されたディレクトリの絶対パスを渡す。`callTool(name, input)` は、当該ツールの結果オブジェクトを返す非同期関数とする。ブラウザーの接続APIや特定のタブIDはモジュールに含めない。
+`receiveAnnotationExport({ callTool, expectedRevision, outputDirectory })` に、接続済みページの公開ツール呼出しと、保存を許可されたディレクトリの絶対パスを渡す。`callTool(name, input)` は、当該ツールの結果オブジェクトを返す非同期関数とする。CUAの `siteTools.call()` が返すJSON文字列は、接続側で `JSON.parse()` してから渡す。最初の `get_annotations` にも同じ解析を適用し、`revision` を文字列から直接参照しない。ブラウザーの接続APIや特定のタブIDはモジュールに含めない。
 
 公開Site toolsの呼出しとファイル保存は、同じJavaScript実行環境内で接続する。別のREPLへハンドルを引き継いだり、モデルがbase64をツール引数へ転記したりする方法は使わない。
 
-以下は、CodexのCUA REPLで取得済みの `tab` を使う接続例。`tab` の取得は、その実行環境が返すブラウザーAPIの説明に従う。モジュールを配置済みの開発・連携環境向けの例であり、Webアプリの利用者にリポジトリ取得やNode.jsのインストールを要求するものではない。パスは実際に許可された絶対パスへ置換する。
+以下は、CodexのCUA REPLで取得済みの `tab` を使う接続例。`tab` の取得は、その実行環境が返すブラウザーAPIの説明に従う。モジュールを配置済みの開発・連携環境向けの例であり、Webアプリの利用者にリポジトリ取得やNode.jsのインストールを要求するものではない。パスは実際に許可された絶対パスへ置換する。まず `fetchTools()` と `siteTools.description()` で現在の登録一覧を確認し、下記 `toolNames` の値を一覧にある完全な名前へ置換する。クライアントが付与する接尾辞を推測せず、ページ遷移・再読込み後は一覧とハンドルを取得し直す。
 
 ```javascript
 const { receiveAnnotationExport } = await import(
@@ -394,9 +462,23 @@ const { receiveAnnotationExport } = await import(
 );
 const webmcp = await tab.capabilities.get('webmcp');
 const siteTools = await webmcp.fetchTools();
-const state = await siteTools.call('get_annotations', {});
+nodeRepl.write(siteTools.description());
+```
+
+```javascript
+const toolNames = {
+  get_annotations: '<一覧にある get_annotations の完全な名前>',
+  prepare_annotation_export: '<一覧にある prepare_annotation_export の完全な名前>',
+  read_annotation_export: '<一覧にある read_annotation_export の完全な名前>',
+  release_annotation_export: '<一覧にある release_annotation_export の完全な名前>'
+};
+const callTool = async (name, input) => {
+  const result = await siteTools.call(toolNames[name], input);
+  return JSON.parse(result);
+};
+const state = await callTool('get_annotations', {});
 const received = await receiveAnnotationExport({
-  callTool: (name, input) => siteTools.call(name, input),
+  callTool,
   expectedRevision: state.revision,
   outputDirectory: '/absolute/path/to/approved-output-directory'
 });

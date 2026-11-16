@@ -9,6 +9,43 @@ import { receiveAnnotationExport } from '../scripts/tools/web/receive-annotation
 
 const tmpRoot = process.env.ANNOFORGE_TEST_TMP_DIR || tmpdir();
 assert.ok(isAbsolute(tmpRoot), 'ANNOFORGE_TEST_TMP_DIRには絶対パスを指定してください');
+const webMcpDocumentation = await readFile(new URL('../docs/WEBMCP.md', import.meta.url), 'utf8');
+const connectionExamples = [...webMcpDocumentation.split('### 4.11 ')[1]
+  .matchAll(/```javascript\n([\s\S]*?)\n```/g)].map(match => match[1]);
+assert.equal(connectionExamples.length, 2, '接続例の検出・受信の両ブロックを実行する');
+
+async function runConnectionExample(outputDirectory, transformResult = (_name, result) => JSON.stringify(result)) {
+  const tools = mockTools();
+  const names = ['get_annotations', 'prepare_annotation_export', 'read_annotation_export', 'release_annotation_export'];
+  const publishedNames = new Map(names.map(name => [`${name}__test-registration`, name]));
+  const calls = [];
+  const output = [];
+  const siteTools = {
+    description: () => `WebMCP tools available in this document:\n${JSON.stringify([...publishedNames.keys()])}`,
+    async call(publishedName, input) {
+      const name = publishedNames.get(publishedName);
+      assert.ok(name, '現在の一覧にある完全なツール名を使う');
+      calls.push(name);
+      const result = name === 'get_annotations' ? { revision: 7 } : await tools.callTool(name, input);
+      return transformResult(name, result);
+    }
+  };
+  let source = connectionExamples.join('\n')
+    .replace("'/absolute/path/to/annoforge/scripts/tools/web/receive-annotation-export.mjs'",
+      JSON.stringify(new URL('../scripts/tools/web/receive-annotation-export.mjs', import.meta.url).href))
+    .replace("'/absolute/path/to/approved-output-directory'", JSON.stringify(outputDirectory));
+  for (const [publishedName, name] of publishedNames) {
+    source = source.replace(`'<一覧にある ${name} の完全な名前>'`, JSON.stringify(publishedName));
+  }
+  const tab = { capabilities: { get: async id => {
+    assert.equal(id, 'webmcp');
+    return { fetchTools: async () => siteTools };
+  } } };
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  await new AsyncFunction('tab', 'nodeRepl', source)(tab, { write: value => output.push(value) });
+  return { result: output.at(-1), calls };
+}
+
 function pngChunk(type, data) {
   const chunk = Buffer.alloc(data.length + 12);
   chunk.writeUInt32BE(data.length, 0);
@@ -74,6 +111,42 @@ function mockTools({ pngBytes = png, jsonBytes = json, mutateManifest, mutateChu
     }
   };
 }
+
+test('文書のCUA接続例でJSON文字列を解析し、revision取得からPNG・JSON保存と解放まで実行できる', async t => {
+  const outputDirectory = await outputRoot(t);
+  const { result, calls } = await runConnectionExample(outputDirectory);
+  assert.equal(result.outcome, 'files_verified');
+  assert.equal(result.revision, 7);
+  assert.equal(result.releaseWarning, undefined);
+  assert.deepEqual(await readFile(result.files.png.path), png);
+  assert.deepEqual(await readFile(result.files.json.path), json);
+  assert.deepEqual(calls, ['get_annotations', 'prepare_annotation_export',
+    'read_annotation_export', 'read_annotation_export', 'release_annotation_export']);
+});
+
+for (const failedTool of ['get_annotations', 'prepare_annotation_export', 'read_annotation_export']) {
+  test(`接続例は${failedTool}の不正なJSON文字列を成功扱いせず、出力を残さない`, async t => {
+    const outputDirectory = await outputRoot(t);
+    const calls = [];
+    await assert.rejects(runConnectionExample(outputDirectory, (name, result) => {
+      calls.push(name);
+      return name === failedTool ? '{broken' : JSON.stringify(result);
+    }), SyntaxError);
+    assert.deepEqual(await readdir(outputDirectory), []);
+    if (failedTool === 'read_annotation_export') assert.equal(calls.at(-1), 'release_annotation_export');
+    if (failedTool === 'get_annotations') assert.deepEqual(calls, ['get_annotations']);
+  });
+}
+
+test('接続例は解放結果のJSON解析失敗を、検証済みファイル取得とは分けて報告する', async t => {
+  const outputDirectory = await outputRoot(t);
+  const { result } = await runConnectionExample(outputDirectory,
+    (name, value) => name === 'release_annotation_export' ? '{broken' : JSON.stringify(value));
+  assert.equal(result.outcome, 'files_verified');
+  assert.match(result.releaseWarning, /SyntaxError/);
+  assert.deepEqual(await readFile(result.files.png.path), png);
+  assert.deepEqual(await readFile(result.files.json.path), json);
+});
 
 test('PNGとJSONの実バイト列を保存し、絶対パスを返し、準備済み出力を解放する', async t => {
   const outputDirectory = await outputRoot(t);

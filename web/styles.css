@@ -152,7 +152,7 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 3000; /* 他要素より常に前面 */
+  z-index: 1100; /* 座標・状態表示より前、モーダル背景より後ろ */
   pointer-events: auto;
 }
 .floating-zoom .zoom-btn,

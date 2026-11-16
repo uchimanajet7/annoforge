@@ -373,8 +373,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isModalOpen() { return importModal && importModal.classList.contains('show'); }
-  function openImportModal() { if (!importModal) return; importModal.classList.add('show'); runImportBtn.disabled = true; importSummary.textContent=''; }
-  function closeImportModal() { if (!importModal) return; importModal.classList.remove('show'); }
+  function openImportModal() {
+    if (!importModal) return;
+    importModal.setAttribute('aria-hidden', 'false');
+    importModal.classList.add('show');
+    runImportBtn.disabled = true;
+    importSummary.textContent = '';
+    importJsonText.focus();
+  }
+  function closeImportModal() {
+    if (!importModal) return;
+    if (importModal.contains(document.activeElement)) openImportModalBtn.focus();
+    importModal.classList.remove('show');
+    importModal.setAttribute('aria-hidden', 'true');
+  }
   function readJsonFile(file) {
     const reader = new FileReader();
     reader.onload = (ev) => { importJsonText.value = ev.target.result || ''; validateImportText(); };
@@ -395,13 +407,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   function runImportFromModal() {
+    let obj;
     try {
-      const obj = JSON.parse(importJsonText.value.trim());
-      importAnnotations(obj);
-      closeImportModal();
-      showNotification('JSONをインポートしました');
+      obj = JSON.parse(importJsonText.value.trim());
     } catch {
       importSummary.textContent = 'JSONの構文エラーがあります';
+      return;
+    }
+    try {
+      if (!importAnnotations(obj)) {
+        importSummary.textContent = '不正なJSON形式です（draw配列が必要）';
+        return;
+      }
+      closeImportModal();
+    } catch {
+      importSummary.textContent = 'JSONの読み込みに失敗しました';
     }
   }
 
@@ -1747,15 +1767,62 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    // 結果オブジェクトの全フィールドを必須とし、返却契約の追加漏れを検出する。
+    const outputObject = properties => ({
+      type: 'object', additionalProperties: false, required: Object.keys(properties), properties
+    });
+    const nonNegativeInteger = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
+    const positiveInteger = { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER };
+    const nonEmptyString = { type: 'string', minLength: 1 };
+    const dimensions = { width: positiveInteger, height: positiveInteger };
+    const imageDimensions = { originalWidth: positiveInteger, originalHeight: positiveInteger };
+    const resultState = { revision: nonNegativeInteger, annotationCount: nonNegativeInteger };
+    const openedImageOutputSchema = outputObject({
+      loaded: { const: true }, revision: nonNegativeInteger, image: outputObject(imageDimensions)
+    });
+    // UIのJSON読込みは置換ツールより広い値を扱うため、入力の最小寸法を流用しない。
+    const outputCoordinate = { type: 'integer' };
+    const outputPoints = { type: 'array', minItems: 6, items: outputCoordinate };
+    const outputAppearance = {
+      color: { type: 'string', pattern: '^[0-9A-Fa-f]{6}$' }, thickness: { type: 'number' }
+    };
+    const annotationOutputSchema = {
+      oneOf: [
+        outputObject({ shape: { const: 'rectangle' }, x: outputCoordinate, y: outputCoordinate,
+          width: outputCoordinate, height: outputCoordinate, ...outputAppearance }),
+        outputObject({ shape: { const: 'line' }, x1: outputCoordinate, y1: outputCoordinate,
+          x2: outputCoordinate, y2: outputCoordinate, ...outputAppearance }),
+        outputObject({ shape: { const: 'polygon' }, points: outputPoints, ...outputAppearance }),
+        outputObject({ shape: { const: 'parallelogram' }, points: outputPoints, ...outputAppearance }),
+        outputObject({ shape: { const: 'circle' }, x: outputCoordinate, y: outputCoordinate,
+          radius: outputCoordinate, ...outputAppearance })
+      ]
+    };
+    const imageDataProperties = {
+      ...resultState, mimeType: { const: 'image/png' }, ...dimensions,
+      dataUrl: { type: 'string', pattern: '^data:image/png;base64,', maxLength: WEBMCP_MAX_DATA_URL_LENGTH }
+    };
+    const downloadProperties = {
+      outcome: { const: 'download_requested' }, requestDispatched: { const: true },
+      completionVerified: { const: false }, filename: nonEmptyString,
+      byteLength: positiveInteger, ...resultState
+    };
+    const artifactProperties = {
+      filename: nonEmptyString, byteLength: positiveInteger,
+      sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }
+    };
+
     try {
       await document.modelContext.registerTool({
         name: 'open_image_from_url',
         title: 'URLから画像を開く',
         description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、HTTPS URL（クロスオリジンの場合は配信元のCORS許可が必要）または同一オリジンのloopback HTTP URLから開きます。成功時は既存アノテーションと作図中の図形を消去します。',
         inputSchema: urlImageInputSchema,
+        outputSchema: openedImageOutputSchema,
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: false
+          untrustedContentHint: false,
+          consequentialHint: true
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1769,9 +1836,11 @@ document.addEventListener('DOMContentLoaded', () => {
         title: 'Data URLから画像を開く',
         description: '現在の版が expectedRevision と一致する場合だけ、呼び出し側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。会話の添付ファイルを直接読み取る機能ではありません。成功時は既存アノテーションと作図中の図形を消去します。',
         inputSchema: dataUrlImageInputSchema,
+        outputSchema: openedImageOutputSchema,
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: false
+          untrustedContentHint: false,
+          consequentialHint: true
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1789,9 +1858,21 @@ document.addEventListener('DOMContentLoaded', () => {
           properties: {},
           additionalProperties: false
         },
+        outputSchema: outputObject({
+          ...resultState,
+          draw: { type: 'array', items: annotationOutputSchema },
+          image: {
+            type: 'object',
+            oneOf: [
+              outputObject({ loaded: { const: true }, ...imageDimensions }),
+              outputObject({ loaded: { const: false }, originalWidth: { type: 'null' }, originalHeight: { type: 'null' } })
+            ]
+          }
+        }),
         annotations: {
           readOnlyHint: true,
-          untrustedContentHint: false
+          untrustedContentHint: false,
+          consequentialHint: false
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1815,9 +1896,11 @@ document.addEventListener('DOMContentLoaded', () => {
         title: '現在の画像プレビューを取得',
         description: '元画像の範囲に確定済みアノテーションを重ね、縦横比を維持したPNG Data URLとして返します。最大辺は既定1024px、指定可能範囲は64pxから2048pxで、元画像より拡大しません。表示のパン、ズーム、選択状態は結果へ影響しません。',
         inputSchema: previewInputSchema,
+        outputSchema: outputObject(imageDataProperties),
         annotations: {
           readOnlyHint: true,
-          untrustedContentHint: true
+          untrustedContentHint: true,
+          consequentialHint: false
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1832,16 +1915,18 @@ document.addEventListener('DOMContentLoaded', () => {
         title: 'アノテーションを置換',
         description: '現在の版が expectedRevision と一致する場合だけ、全アノテーションを整数ピクセル座標の AnnoForge draw 配列で置き換えます。空配列は全消去です。全項目の検証後にだけ変更します。',
         inputSchema: replaceAnnotationsInputSchema,
+        outputSchema: outputObject({ replaced: { const: true }, ...resultState }),
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: false
+          untrustedContentHint: false,
+          consequentialHint: true
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
           const replaceInput = validateWebMcpReplaceInput(input);
           assertCurrentWorkspaceRevision(replaceInput.expectedRevision);
           throwIfWebMcpExecutionAborted(signal);
-          importAnnotations({ draw: replaceInput.draw });
+          replaceWebMcpAnnotations(replaceInput.draw);
           return {
             replaced: true,
             annotationCount: shapes.length,
@@ -1855,9 +1940,11 @@ document.addEventListener('DOMContentLoaded', () => {
         title: 'アノテーションJSONの保存を開始',
         description: 'ブラウザーのダウンロード一覧でJSONを受け取るための保存要求です。expectedRevisionが現在の版と一致し、注釈がある場合に現在のdrawをJSONとして生成します。結果は要求送信までを示します。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
         inputSchema: downloadInputSchema,
+        outputSchema: outputObject({ ...downloadProperties, mimeType: { const: 'application/json' } }),
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: false
+          untrustedContentHint: false,
+          consequentialHint: false
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1873,9 +1960,17 @@ document.addEventListener('DOMContentLoaded', () => {
         title: '注釈付き画像を出力',
         description: 'PNG単体をData URLで取得するか、ブラウザーのダウンロード一覧へ保存要求する用途です。expectedRevisionが現在の版と一致する場合に元画像寸法で生成し、表示のパン・ズーム・選択状態は含めません。data_urlの結果は文字列、downloadの結果は要求送信の通知です。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
         inputSchema: exportImageInputSchema,
+        outputSchema: {
+          type: 'object',
+          oneOf: [
+            outputObject({ outcome: { const: 'data_returned' }, delivery: { const: 'data_url' }, ...imageDataProperties }),
+            outputObject({ ...downloadProperties, mimeType: { const: 'image/png' }, ...dimensions })
+          ]
+        },
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: true
+          untrustedContentHint: true,
+          consequentialHint: false
         },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
@@ -1906,7 +2001,14 @@ document.addEventListener('DOMContentLoaded', () => {
         title: 'PNGとJSONの受け渡しを準備',
         description: '会話へ渡す元画像寸法PNGと完全な注釈JSONの実ファイルを準備します。同じexpectedRevisionの2ファイルのexportId・名前・バイト数・SHA-256を返します。read_annotation_exportの戻り値を同じJavaScript実行環境で復号・ファイル保存し、検証した絶対パスを最終回答の画像とファイルリンクに使えます。ブラウザーダウンロードは使いません。準備済み出力は1組で、新しい準備・画像や注釈の編集・release_annotation_export・ページ終了で無効になります。',
         inputSchema: downloadInputSchema,
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        outputSchema: outputObject({
+          outcome: { const: 'export_prepared' }, exportId: nonEmptyString, ...resultState,
+          artifacts: outputObject({
+            png: outputObject({ ...artifactProperties, mimeType: { const: 'image/png' }, ...dimensions }),
+            json: outputObject({ ...artifactProperties, mimeType: { const: 'application/json' } })
+          })
+        }),
+        annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: false },
         execute: async (input, { signal } = {}) => {
           const { expectedRevision } = validateWebMcpDownloadInput(input);
           return prepareAnnotationExport(expectedRevision, signal);
@@ -1927,7 +2029,13 @@ document.addEventListener('DOMContentLoaded', () => {
             maxBytes: { type: 'integer', minimum: 1, maximum: WEBMCP_EXPORT_MAX_CHUNK_BYTES, default: WEBMCP_EXPORT_CHUNK_BYTES }
           }
         },
-        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        outputSchema: outputObject({
+          exportId: nonEmptyString, revision: nonNegativeInteger, format: { type: 'string', enum: ['png', 'json'] },
+          offset: nonNegativeInteger, nextOffset: positiveInteger, eof: { type: 'boolean' },
+          base64: { type: 'string', minLength: 4, maxLength: Math.ceil(WEBMCP_EXPORT_MAX_CHUNK_BYTES / 3) * 4,
+            pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$' }
+        }),
+        annotations: { readOnlyHint: true, untrustedContentHint: true, consequentialHint: false },
         execute: async (input, { signal } = {}) => readAnnotationExport(validateWebMcpExportReference(input, true), signal)
       });
 
@@ -1939,7 +2047,8 @@ document.addEventListener('DOMContentLoaded', () => {
           type: 'object', additionalProperties: false, required: ['exportId'],
           properties: { exportId: { type: 'string', minLength: 1 } }
         },
-        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        outputSchema: outputObject({ exportId: nonEmptyString, released: { type: 'boolean' } }),
+        annotations: { readOnlyHint: false, untrustedContentHint: false, consequentialHint: false },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
           const { exportId } = validateWebMcpExportReference(input);
@@ -2337,51 +2446,138 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // JSON読み込み（モーダルで実施）
 
-  function importAnnotations(obj) {
-    if (!obj || !Array.isArray(obj.draw)) { showNotification('不正なJSON形式です（draw配列が必要）', 'error'); return; }
-    clearAll({ advanceRevision: false });
-    let ok = 0, skip = 0;
-    for (const it of obj.draw) {
-      const shape = (it.shape || '').toLowerCase();
-      const colorHex = normalizeHex(it.color);
-      const thickness = Number.isFinite(it.thickness) ? it.thickness : defaultThickness;
-      if (!colorHex) { skip++; continue; }
-      if (shape === 'rectangle') {
-        if (!isFinite(it.x)||!isFinite(it.y)||!isFinite(it.width)||!isFinite(it.height)) { skip++; continue; }
-        const model = { id: idSeq++, type: 'rectangle', colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), width: Math.round(it.width), height: Math.round(it.height) };
-        const node = new Konva.Rect({ x: model.x * canvasScale, y: model.y * canvasScale, width: model.width * canvasScale, height: model.height * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: false });
-        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
-        shapes.push(model); ok++;
-      } else if (shape === 'line') {
-        if (!isFinite(it.x1)||!isFinite(it.y1)||!isFinite(it.x2)||!isFinite(it.y2)) { skip++; continue; }
-        const model = { id: idSeq++, type: 'line', colorHex, thickness, x1: Math.round(it.x1), y1: Math.round(it.y1), x2: Math.round(it.x2), y2: Math.round(it.y2) };
-        const pts = [model.x1 * canvasScale, model.y1 * canvasScale, model.x2 * canvasScale, model.y2 * canvasScale];
-        const node = new Konva.Line({ points: pts, ...commonStrokeProps(thickness, colorHex), draggable: false, hitStrokeWidth: Math.max(8, thickness) });
-        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
-        shapes.push(model); ok++;
-      } else if (shape === 'polygon' || shape === 'parallelogram') {
-        if (!Array.isArray(it.points) || it.points.length < 6 || it.points.length % 2 !== 0) { skip++; continue; }
-        const pts = it.points.map(v => Math.round(v));
-        const model = { id: idSeq++, type: shape, colorHex, thickness, points: pts };
-        const scaled = pts.map(v => v * canvasScale);
-        const node = new Konva.Line({ points: scaled, closed: true, ...commonStrokeProps(thickness, colorHex), draggable: false });
-        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
-        shapes.push(model); ok++;
-      } else if (shape === 'circle') {
-        if (!isFinite(it.x)||!isFinite(it.y)||!isFinite(it.radius)) { skip++; continue; }
-        const model = { id: idSeq++, type: 'circle', colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), radius: Math.round(it.radius) };
-        const node = new Konva.Circle({ x: model.x * canvasScale, y: model.y * canvasScale, radius: model.radius * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: false });
-        node.strokeScaleEnabled(false);
-        registerFinalizedShapeNode(node, model); annotationsLayer.add(node);
-        shapes.push(model); ok++;
-      } else {
-        skip++;
-      }
+  function createImportedAnnotation(it, id) {
+    if (!it || typeof it !== 'object' || Array.isArray(it) || typeof it.shape !== 'string' || typeof it.color !== 'string') return null;
+    const shape = it.shape.toLowerCase();
+    const colorHex = normalizeHex(it.color);
+    const thickness = Number.isFinite(it.thickness) ? it.thickness : defaultThickness;
+    if (!colorHex) return null;
+    let model, node;
+    if (shape === 'rectangle') {
+      if (![it.x, it.y, it.width, it.height].every(Number.isFinite)) return null;
+      model = { id, type: shape, colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), width: Math.round(it.width), height: Math.round(it.height) };
+      node = new Konva.Rect({ x: model.x * canvasScale, y: model.y * canvasScale, width: model.width * canvasScale, height: model.height * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: false });
+    } else if (shape === 'line') {
+      if (![it.x1, it.y1, it.x2, it.y2].every(Number.isFinite)) return null;
+      model = { id, type: shape, colorHex, thickness, x1: Math.round(it.x1), y1: Math.round(it.y1), x2: Math.round(it.x2), y2: Math.round(it.y2) };
+      const pts = [model.x1 * canvasScale, model.y1 * canvasScale, model.x2 * canvasScale, model.y2 * canvasScale];
+      node = new Konva.Line({ points: pts, ...commonStrokeProps(thickness, colorHex), draggable: false, hitStrokeWidth: Math.max(8, thickness) });
+    } else if (shape === 'polygon' || shape === 'parallelogram') {
+      if (!Array.isArray(it.points) || it.points.length < 6 || it.points.length % 2 !== 0 || !it.points.every(Number.isFinite)) return null;
+      const pts = it.points.map(v => Math.round(v));
+      model = { id, type: shape, colorHex, thickness, points: pts };
+      node = new Konva.Line({ points: pts.map(v => v * canvasScale), closed: true, ...commonStrokeProps(thickness, colorHex), draggable: false });
+    } else if (shape === 'circle') {
+      if (![it.x, it.y, it.radius].every(Number.isFinite)) return null;
+      model = { id, type: shape, colorHex, thickness, x: Math.round(it.x), y: Math.round(it.y), radius: Math.round(it.radius) };
+      node = new Konva.Circle({ x: model.x * canvasScale, y: model.y * canvasScale, radius: model.radius * canvasScale, ...commonStrokeProps(thickness, colorHex), draggable: false });
+    } else {
+      return null;
     }
+    try {
+      if (shape === 'circle') node.strokeScaleEnabled(false);
+      registerFinalizedShapeNode(node, model);
+      return { model, node };
+    } catch (error) {
+      node.destroy();
+      throw error;
+    }
+  }
+
+  function replaceWebMcpAnnotations(draw) {
+    const previous = {
+      annotationsLayer, guidesLayer, shapes: shapes.slice(), selectedShapeId, transformer, draft, snapMarker,
+      listNodes: Array.from(annotationList.childNodes), jsonText: jsonDisplay.textContent
+    };
+    const nextShapes = [];
+    let nextLayer = null, nextGuidesLayer = null, stateChanged = false;
+    try {
+      nextLayer = new Konva.Layer();
+      for (const it of draw) {
+        const imported = createImportedAnnotation(it, idSeq + nextShapes.length);
+        if (!imported) throw new TypeError('検証済みのアノテーションを生成できませんでした');
+        try {
+          nextLayer.add(imported.node);
+        } catch (error) {
+          imported.node.destroy();
+          throw error;
+        }
+        nextShapes.push(imported.model);
+      }
+      // Stage.addは同期描画する。元のノードを残し、生成・描画の失敗で再生成を必要としない。
+      stage.add(nextLayer);
+      nextLayer.zIndex(previous.annotationsLayer.zIndex());
+      nextGuidesLayer = new Konva.Layer({ listening: false });
+      stage.add(nextGuidesLayer);
+      stateChanged = true;
+      annotationsLayer = nextLayer;
+      guidesLayer = nextGuidesLayer;
+      shapes.length = 0;
+      for (const model of nextShapes) shapes.push(model);
+      selectedShapeId = null;
+      transformer = null;
+      draft = null;
+      snapMarker = null;
+      updateAnnotationList();
+    } catch (error) {
+      try {
+        if (stateChanged) {
+          annotationsLayer = previous.annotationsLayer;
+          guidesLayer = previous.guidesLayer;
+          shapes.length = 0;
+          for (const model of previous.shapes) shapes.push(model);
+          selectedShapeId = previous.selectedShapeId;
+          transformer = previous.transformer;
+          draft = previous.draft;
+          snapMarker = previous.snapMarker;
+          annotationList.replaceChildren();
+          for (const node of previous.listNodes) annotationList.appendChild(node);
+          jsonDisplay.textContent = previous.jsonText;
+          syncColorControls();
+        }
+      } finally {
+        if (nextLayer) nextLayer.destroy();
+        if (nextGuidesLayer) nextGuidesLayer.destroy();
+      }
+      throw error;
+    }
+    idSeq += nextShapes.length;
     advanceWorkspaceRevision();
-    annotationsLayer.draw();
-    updateAnnotationList();
+    // 反映完了後の後処理・通知の失敗を、置換の失敗として返さない。
+    try {
+      previous.annotationsLayer.destroy();
+      previous.guidesLayer.destroy();
+      hideCoordinates();
+      showNotification(`${nextShapes.length}件読み込み、0件スキップ`, 'success');
+    } catch (error) {
+      console.error('アノテーション置換後の後処理に失敗しました:', error);
+    }
+  }
+
+  function importAnnotations(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj) || !Array.isArray(obj.draw)) {
+      showNotification('不正なJSON形式です（draw配列が必要）', 'error');
+      return false;
+    }
+    // 置換中に例外が発生しても、変更前の版と準備済み出力を残さない。
+    advanceWorkspaceRevision();
+    let ok = 0, skip = 0;
+    try {
+      clearAll({ advanceRevision: false });
+      for (const it of obj.draw) {
+        const imported = createImportedAnnotation(it, idSeq);
+        if (!imported) { skip++; continue; }
+        idSeq++;
+        annotationsLayer.add(imported.node);
+        shapes.push(imported.model); ok++;
+      }
+    } finally {
+      // 途中まで読み込んで失敗した場合も、表示を実際の注釈データに揃える。
+      updateAnnotationList();
+      annotationsLayer.draw();
+    }
     showNotification(`${ok}件読み込み、${skip}件スキップ` , skip ? 'error' : 'success');
+    return true;
   }
 
   function normalizeHex(c) {

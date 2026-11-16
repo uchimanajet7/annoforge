@@ -32,8 +32,8 @@ jobs:
           node --check web/image-loading.js
           node --check scripts/tools/web/receive-annotation-export.mjs
 
-      - name: Test image loading and export receiver
-        run: node --test tests/image-loading.test.mjs tests/webmcp-export.test.mjs
+      - name: Test image loading, export receiver, tool contracts and import modal
+        run: node --test tests/image-loading.test.mjs tests/webmcp-export.test.mjs tests/webmcp-tools.test.mjs tests/import-modal.test.mjs
 
   shellcheck:
     name: ShellCheck (scripts/**/*.sh)
