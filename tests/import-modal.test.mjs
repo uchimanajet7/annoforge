@@ -47,6 +47,7 @@ function harness({ importResult = true, importError = null } = {}) {
   const ids = ['importModal', 'openImportModalBtn', 'closeImportModalBtn', 'cancelImportBtn',
     'importPasteBtn', 'importJsonFile', 'importJsonText', 'importDropZone', 'runImportBtn', 'importSummary', 'stageContainer'];
   const context = Object.fromEntries(ids.map(id => [id, element(id)]));
+  document.body = element('body');
   const children = new Set(ids.filter(id => !['importModal', 'openImportModalBtn', 'stageContainer'].includes(id)).map(id => context[id]));
   context.importModal.contains = node => node === context.importModal || children.has(node);
   context.document = document;
@@ -109,7 +110,7 @@ test('初期非表示と再オープンで表示・ARIA・フォーカスが一�
 });
 
 for (const path of ['閉じる', 'キャンセル', 'Escape', '背景']) {
-  test(`${path}で閉じると非表示になり、内部のフォーカスを起動ボタンへ戻す`, async () => {
+  test(`${path}で閉じると非表示になり、フォーカスを起動ボタンへ戻す`, async () => {
     const h = harness();
     await h.openImportModalBtn.dispatch('click');
     assertOpen(h);
@@ -120,6 +121,8 @@ for (const path of ['閉じる', 'キャンセル', 'Escape', '背景']) {
     } else if (path === 'Escape') {
       await h.window.dispatch('keydown', { key: 'Escape' });
     } else {
+      // 背景の押下で入力欄がフォーカスを失い、その後にclickが届く。
+      h.document.body.focus();
       await h.importModal.dispatch('click', { target: { hasAttribute: name => name === 'data-close-modal' } });
     }
     assertClosed(h);
@@ -176,6 +179,14 @@ test('既に閉じた状態のEscapeは外部のフォーカスを移動しな�
   const h = harness();
   h.stageContainer.focus();
   await h.window.dispatch('keydown', { key: 'Escape' });
+  assertClosed(h);
+  assert.equal(h.document.activeElement, h.stageContainer);
+});
+
+test('既に閉じた状態の終了処理は外部のフォーカスを移動しない', () => {
+  const h = harness();
+  h.stageContainer.focus();
+  h.closeImportModal();
   assertClosed(h);
   assert.equal(h.document.activeElement, h.stageContainer);
 });

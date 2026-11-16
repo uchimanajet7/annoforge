@@ -382,8 +382,9 @@ document.addEventListener('DOMContentLoaded', () => {
     importJsonText.focus();
   }
   function closeImportModal() {
-    if (!importModal) return;
-    if (importModal.contains(document.activeElement)) openImportModalBtn.focus();
+    if (!isModalOpen()) return;
+    // 背景の押下でフォーカスがbodyへ移った場合も、起動ボタンへ戻す。
+    openImportModalBtn.focus();
     importModal.classList.remove('show');
     importModal.setAttribute('aria-hidden', 'true');
   }
