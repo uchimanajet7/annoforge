@@ -247,3 +247,54 @@ for (const value of ['', null, 'data:image/svg+xml;base64,YQ==', 'data:image/png
     assert.equal(h.commits.length, 0);
   });
 }
+
+test('入力・取得・容量・デコード失敗に安定したcodeを付け、取得元の内部情報を返さない', async () => {
+  const cases = [
+    [{}, { kind: 'url', value: 'https://user:private@images.example/a.png' }, 'INVALID_INPUT'],
+    [{}, { kind: 'data_url', value: 'data:image/png;base64,!!!' }, 'INVALID_INPUT'],
+    [{ fetchResponse: response({ status: 404 }) }, urlInput, 'IMAGE_LOAD_FAILED'],
+    [{ fetchResponse: response({ type: 'text/html' }) }, urlInput, 'IMAGE_LOAD_FAILED'],
+    [{ fetchResponse: response({ length: 12 * 1024 * 1024 + 1 }) }, urlInput, 'SIZE_LIMIT_EXCEEDED'],
+    [{ decodeFails: true }, dataInput, 'IMAGE_LOAD_FAILED'],
+    [{ fetchResponse: () => { throw new Error('private network detail'); } }, urlInput, 'IMAGE_LOAD_FAILED'],
+    [{ fetchResponse: { ...response(), blob: async () => { throw new Error('private body detail'); } } }, urlInput, 'IMAGE_LOAD_FAILED']
+  ];
+  for (const [options, input, code] of cases) {
+    const h = harness(options);
+    await assert.rejects(h.loader.load(input), error => {
+      assert.ok(error instanceof h.api.ImageLoadingError);
+      assert.equal(error.code, code);
+      assert.doesNotMatch(error.message, /private/);
+      return true;
+    });
+    assert.equal(h.commits.length, 0);
+  }
+});
+
+test('外部signalの任意の取消理由を開始前・デコード中ともそのまま保持する', async () => {
+  for (const reason of [false, 0, '', null, { cancelled: true }]) {
+    const h = harness({ autoDecode: false });
+    await assert.rejects(h.loader.load(dataInput, { signal: AbortSignal.abort(reason) }), error => error === reason);
+    const controller = new AbortController();
+    const pending = h.loader.load(dataInput, { signal: controller.signal });
+    const rejected = assert.rejects(pending, error => error === reason);
+    controller.abort(reason);
+    await rejected;
+    assert.equal(h.commits.length, 0);
+  }
+});
+
+test('別の読込み・ページ側取消し・作業変更をそれぞれ分類し、外部signalの取消しと混同しない', async () => {
+  const h = harness({ autoDecode: false });
+  const oldController = new AbortController();
+  const old = h.loader.load(dataInput, { signal: oldController.signal });
+  const superseded = assert.rejects(old, { code: 'OPERATION_SUPERSEDED', name: 'AbortError' });
+  const next = h.loader.load(fileInput);
+  const cancelled = assert.rejects(next, { code: 'OPERATION_CANCELLED', name: 'AbortError' });
+  await superseded;
+  assert.equal(oldController.signal.aborted, false);
+  h.loader.cancel();
+  await cancelled;
+  await assert.rejects(h.loader.load(dataInput, { expectedVersion: 'stale' }), { code: 'REVISION_CONFLICT' });
+  assert.equal(h.commits.length, 0);
+});

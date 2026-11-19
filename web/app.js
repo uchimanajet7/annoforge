@@ -178,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     imageLayer = new Konva.Layer({ listening: false });
     annotationsLayer = new Konva.Layer();
-    guidesLayer = new Konva.Layer({ listening: false });
+    guidesLayer = new Konva.Layer();
     stage.add(imageLayer);
     stage.add(annotationsLayer);
     stage.add(guidesLayer);
@@ -668,7 +668,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function commitLoadedImage(image, imageName) {
-    if (transformer?.isTransforming()) throw new Error('図形を変形中のため画像を開きませんでした。編集を終えてから、もう一度実行してください');
+    if (transformer?.isTransforming()) throw new WebMcpError('EDIT_IN_PROGRESS', '図形を変形中のため画像を開きませんでした。編集を終えてから、もう一度実行してください');
     loadedImage = image;
     loadedImageName = imageName;
     placeImage();
@@ -853,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
       transformer.moveToTop();
     } else {
       transformer.nodes([]);
-      drawAnchorsForModel(model, node);
+      syncVertexAnchors(model, node);
     }
     syncAnnotationListSelection();
     syncColorControls();
@@ -861,39 +861,34 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // アンカー描画（線/多角形/平行四辺形）
-  function drawAnchorsForModel(model, node) {
+  function syncVertexAnchors(model, node) {
     const points = getModelPoints(model);
+    const anchors = guidesLayer.find('.vertex-anchor');
     points.forEach((p, idx) => {
-      const c = new Konva.Circle({ x: p.x * canvasScale, y: p.y * canvasScale, radius: 6, fill: '#fff', stroke: '#333', strokeWidth: 2, draggable: true });
-      c.on('dragmove', () => {
-        const nx = c.x() / canvasScale; const ny = c.y() / canvasScale;
-        updateModelPoint(model, idx, { x: nx, y: ny });
+      const position = { x: p.x * canvasScale, y: p.y * canvasScale };
+      if (anchors[idx]) {
+        anchors[idx].position(position);
+        return;
+      }
+      const anchor = new Konva.Circle({ name: 'vertex-anchor', ...position, radius: 6, fill: '#fff', stroke: '#333', strokeWidth: 2, draggable: true });
+      anchor.on('dragmove', () => {
+        updateModelPoint(model, idx, { x: anchor.x() / canvasScale, y: anchor.y() / canvasScale });
         advanceWorkspaceRevision();
         redrawNodeFromModel(model, node);
         updateAnnotationList();
       });
-      c.on('mouseenter', () => { showHint(model.type==='polygon' ? '頂点: ドラッグで移動 / ダブルクリックで削除' : '頂点: ドラッグで移動'); });
-      c.on('dblclick', () => {
-        if (model.type === 'polygon') {
-          if (!Array.isArray(model.points) || model.points.length < 6) return;
-          if (model.points.length <= 6) return; // 3点未満にはしない
-          model.points.splice(idx*2, 2);
-          if (model.points.length < 6) {
-            // ノード削除
-            node.destroy();
-            const i = shapes.findIndex(s => s.id === model.id);
-            if (i >= 0) shapes.splice(i, 1);
-            annotationsLayer.draw();
-          } else {
-            redrawNodeFromModel(model, node);
-          }
-          advanceWorkspaceRevision();
-          updateAnnotationList();
-        }
+      anchor.on('mouseenter', () => { showHint(model.type==='polygon' ? '頂点: ドラッグで移動 / ダブルクリックで削除' : '頂点: ドラッグで移動'); });
+      anchor.on('dblclick', () => {
+        if (model.type !== 'polygon' || model.points.length <= 6) return;
+        model.points.splice(idx * 2, 2);
+        redrawNodeFromModel(model, node);
+        advanceWorkspaceRevision();
+        updateAnnotationList();
       });
-      guidesLayer.add(c);
+      guidesLayer.add(anchor);
     });
-    guidesLayer.draw();
+    anchors.slice(points.length).forEach(anchor => anchor.destroy());
+    guidesLayer.batchDraw();
   }
 
   // アンカー削除
@@ -940,9 +935,7 @@ document.addEventListener('DOMContentLoaded', () => {
       node.radius(model.radius * canvasScale);
     }
     annotationsLayer.batchDraw();
-    // アンカー再配置
-    removeAnchors();
-    if (selectedShapeId === model.id && (model.type !== 'rectangle' && model.type !== 'circle')) drawAnchorsForModel(model, node);
+    if (selectedShapeId === model.id && model.type !== 'rectangle' && model.type !== 'circle') syncVertexAnchors(model, node);
   }
 
   // ノード共通ハンドラ
@@ -1378,12 +1371,68 @@ document.addEventListener('DOMContentLoaded', () => {
     return {};
   }
 
+  class WebMcpError extends Error {
+    constructor(code, message) {
+      super(message);
+      this.name = 'WebMcpError';
+      this.code = code;
+    }
+  }
+
+  function assertNoAnnotationTransformInProgress() {
+    if (transformer?.isTransforming()) {
+      throw new WebMcpError('EDIT_IN_PROGRESS', '図形を変形中のため処理できません。変形を終え、最新状態を確認してから再実行してください。');
+    }
+  }
+
+  function registerWebMcpTool(tool) {
+    const errorSchema = {
+      type: 'object', additionalProperties: false, required: ['error'],
+      properties: {
+        error: {
+          type: 'object', additionalProperties: false, required: ['code', 'message'],
+          properties: {
+            code: { type: 'string', enum: [
+              'INVALID_INPUT', 'REVISION_CONFLICT', 'IMAGE_NOT_LOADED', 'NO_ANNOTATIONS',
+              'EXPORT_UNAVAILABLE', 'IMAGE_LOAD_FAILED', 'SIZE_LIMIT_EXCEEDED', 'EDIT_IN_PROGRESS',
+              'OPERATION_SUPERSEDED', 'OPERATION_CANCELLED', 'OUTPUT_GENERATION_FAILED',
+              'DOWNLOAD_REQUEST_FAILED', 'INTERNAL_ERROR'
+            ] },
+            message: { type: 'string', minLength: 1 }
+          }
+        }
+      }
+    };
+    return document.modelContext.registerTool({
+      ...tool,
+      description: `${tool.description} 失敗時はerror.codeとerror.messageを返します。成功結果を参照する前にerrorの有無を確認してください。`,
+      outputSchema: { type: 'object', oneOf: [tool.outputSchema, errorSchema] },
+      execute: async (input, options = {}) => {
+        try {
+          throwIfWebMcpExecutionAborted(options.signal);
+          // awaitして非同期処理の拒否も同じ境界で扱う。
+          return await tool.execute(input, options);
+        } catch (error) {
+          throwIfWebMcpExecutionAborted(options.signal);
+          if (error instanceof WebMcpError || error instanceof AnnoForgeImageLoading.ImageLoadingError) {
+            return { error: { code: error.code, message: error.message } };
+          }
+          console.error(`WebMCP ${tool.name} の内部エラー:`, error);
+          return { error: {
+            code: 'INTERNAL_ERROR',
+            message: '内部エラーにより処理を完了できませんでした。get_annotationsで現在の状態を確認してください。'
+          } };
+        }
+      }
+    });
+  }
+
   function validateWebMcpUrlImageInput(input) {
     assertWebMcpObject(input, 'input');
     assertWebMcpExactKeys(input, ['expectedRevision', 'url'], 'input');
     assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
     if (typeof input.url !== 'string' || input.url.trim() === '') {
-      throw new TypeError('input.url は空でない絶対URL文字列である必要があります');
+      throw new WebMcpError('INVALID_INPUT', 'input.url は空でない絶対URL文字列である必要があります');
     }
     return {
       expectedRevision: input.expectedRevision,
@@ -1414,7 +1463,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function validateWebMcpAnnotationDocument(input) {
     assertWebMcpObject(input, 'input');
     assertWebMcpExactKeys(input, ['draw'], 'input');
-    if (!Array.isArray(input.draw)) throw new TypeError('draw は配列である必要があります');
+    if (!Array.isArray(input.draw)) throw new WebMcpError('INVALID_INPUT', 'draw は配列である必要があります');
 
     for (let index = 0; index < input.draw.length; index++) {
       const annotation = input.draw[index];
@@ -1427,8 +1476,8 @@ document.addEventListener('DOMContentLoaded', () => {
         assertWebMcpSafeInteger(annotation.y, `${path}.y`);
         assertWebMcpSafeInteger(annotation.width, `${path}.width`);
         assertWebMcpSafeInteger(annotation.height, `${path}.height`);
-        if (annotation.width < 5) throw new TypeError(`${path}.width は5以上である必要があります`);
-        if (annotation.height < 5) throw new TypeError(`${path}.height は5以上である必要があります`);
+        if (annotation.width < 5) throw new WebMcpError('INVALID_INPUT', `${path}.width は5以上である必要があります`);
+        if (annotation.height < 5) throw new WebMcpError('INVALID_INPUT', `${path}.height は5以上である必要があります`);
       } else if (annotation.shape === 'line') {
         assertWebMcpExactKeys(annotation, ['shape', 'x1', 'y1', 'x2', 'y2', 'color', 'thickness'], path);
         assertWebMcpSafeInteger(annotation.x1, `${path}.x1`);
@@ -1436,7 +1485,7 @@ document.addEventListener('DOMContentLoaded', () => {
         assertWebMcpSafeInteger(annotation.x2, `${path}.x2`);
         assertWebMcpSafeInteger(annotation.y2, `${path}.y2`);
         if (Math.hypot(annotation.x2 - annotation.x1, annotation.y2 - annotation.y1) < 5) {
-          throw new TypeError(`${path} の線の長さは5以上である必要があります`);
+          throw new WebMcpError('INVALID_INPUT', `${path} の線の長さは5以上である必要があります`);
         }
       } else if (annotation.shape === 'polygon') {
         assertWebMcpExactKeys(annotation, ['shape', 'points', 'color', 'thickness'], path);
@@ -1449,16 +1498,16 @@ document.addEventListener('DOMContentLoaded', () => {
         assertWebMcpSafeInteger(annotation.x, `${path}.x`);
         assertWebMcpSafeInteger(annotation.y, `${path}.y`);
         assertWebMcpSafeInteger(annotation.radius, `${path}.radius`);
-        if (annotation.radius < 3) throw new TypeError(`${path}.radius は3以上である必要があります`);
+        if (annotation.radius < 3) throw new WebMcpError('INVALID_INPUT', `${path}.radius は3以上である必要があります`);
       } else {
-        throw new TypeError(`${path}.shape は rectangle、line、polygon、parallelogram、circle のいずれかである必要があります`);
+        throw new WebMcpError('INVALID_INPUT', `${path}.shape は rectangle、line、polygon、parallelogram、circle のいずれかである必要があります`);
       }
 
       if (typeof annotation.color !== 'string' || !/^#?[0-9A-Fa-f]{6}$/.test(annotation.color) || !normalizeHex(annotation.color)) {
-        throw new TypeError(`${path}.color は先頭の # が任意の6桁HEX文字列である必要があります`);
+        throw new WebMcpError('INVALID_INPUT', `${path}.color は先頭の # が任意の6桁HEX文字列である必要があります`);
       }
       assertWebMcpFiniteNumber(annotation.thickness, `${path}.thickness`);
-      if (annotation.thickness <= 0) throw new TypeError(`${path}.thickness は0より大きい値である必要があります`);
+      if (annotation.thickness <= 0) throw new WebMcpError('INVALID_INPUT', `${path}.thickness は0より大きい値である必要があります`);
     }
 
     return input;
@@ -1482,7 +1531,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function validateWebMcpPreviewInput(input) {
     assertWebMcpObject(input, 'input');
     const extraKey = Object.keys(input).find((key) => key !== 'maxDimension');
-    if (extraKey !== undefined) throw new TypeError(`input[${JSON.stringify(extraKey)}] は追加できません`);
+    if (extraKey !== undefined) throw new WebMcpError('INVALID_INPUT', 'inputにはmaxDimension以外の項目を追加できません');
     const maxDimension = input.maxDimension === undefined
       ? WEBMCP_PREVIEW_DEFAULT_MAX_DIMENSION
       : input.maxDimension;
@@ -1491,7 +1540,7 @@ document.addEventListener('DOMContentLoaded', () => {
       maxDimension < WEBMCP_PREVIEW_MIN_DIMENSION ||
       maxDimension > WEBMCP_PREVIEW_MAX_DIMENSION
     ) {
-      throw new TypeError(`input.maxDimension は${WEBMCP_PREVIEW_MIN_DIMENSION}以上${WEBMCP_PREVIEW_MAX_DIMENSION}以下の整数である必要があります`);
+      throw new WebMcpError('INVALID_INPUT', `input.maxDimension は${WEBMCP_PREVIEW_MIN_DIMENSION}以上${WEBMCP_PREVIEW_MAX_DIMENSION}以下の整数である必要があります`);
     }
     return { maxDimension };
   }
@@ -1501,7 +1550,7 @@ document.addEventListener('DOMContentLoaded', () => {
     assertWebMcpExactKeys(input, ['expectedRevision', 'delivery'], 'input');
     assertWebMcpRevision(input.expectedRevision, 'input.expectedRevision');
     if (input.delivery !== 'data_url' && input.delivery !== 'download') {
-      throw new TypeError('input.delivery はdata_urlまたはdownloadである必要があります');
+      throw new WebMcpError('INVALID_INPUT', 'input.delivery はdata_urlまたはdownloadである必要があります');
     }
     return input;
   }
@@ -1516,13 +1565,13 @@ document.addEventListener('DOMContentLoaded', () => {
     assertWebMcpObject(input, 'input');
     assertWebMcpExactKeys(input, read ? ['exportId', 'format', 'offset', 'maxBytes'] : ['exportId'], 'input');
     if (typeof input.exportId !== 'string' || !input.exportId) {
-      throw new TypeError('input.exportId は出力準備で取得した識別子である必要があります');
+      throw new WebMcpError('INVALID_INPUT', 'input.exportId は出力準備で取得した識別子である必要があります');
     }
     if (read) {
-      if (input.format !== 'png' && input.format !== 'json') throw new TypeError('input.format はpngまたはjsonである必要があります');
+      if (input.format !== 'png' && input.format !== 'json') throw new WebMcpError('INVALID_INPUT', 'input.format はpngまたはjsonである必要があります');
       assertWebMcpRevision(input.offset, 'input.offset');
       if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1 || input.maxBytes > WEBMCP_EXPORT_MAX_CHUNK_BYTES) {
-        throw new TypeError(`input.maxBytes は1以上${WEBMCP_EXPORT_MAX_CHUNK_BYTES}以下の整数である必要があります`);
+        throw new WebMcpError('INVALID_INPUT', `input.maxBytes は1以上${WEBMCP_EXPORT_MAX_CHUNK_BYTES}以下の整数である必要があります`);
       }
     }
     return input;
@@ -1530,46 +1579,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function assertWebMcpObject(value, path) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      throw new TypeError(`${path} はオブジェクトである必要があります`);
+      throw new WebMcpError('INVALID_INPUT', `${path} はオブジェクトである必要があります`);
     }
   }
 
   function assertWebMcpExactKeys(value, expectedKeys, path) {
     const missingKey = expectedKeys.find((key) => !Object.prototype.hasOwnProperty.call(value, key));
-    if (missingKey) throw new TypeError(`${path}.${missingKey} は必須です`);
+    if (missingKey) throw new WebMcpError('INVALID_INPUT', `${path}.${missingKey} は必須です`);
     const extraKey = Object.keys(value).find((key) => !expectedKeys.includes(key));
-    if (extraKey !== undefined) throw new TypeError(`${path}[${JSON.stringify(extraKey)}] は追加できません`);
+    if (extraKey !== undefined) throw new WebMcpError('INVALID_INPUT', `${path}には定義されていない項目を追加できません`);
   }
 
   function assertWebMcpFiniteNumber(value, path) {
-    if (!Number.isFinite(value)) throw new TypeError(`${path} は有限数である必要があります`);
+    if (!Number.isFinite(value)) throw new WebMcpError('INVALID_INPUT', `${path} は有限数である必要があります`);
   }
 
   function assertWebMcpSafeInteger(value, path) {
-    if (!Number.isSafeInteger(value)) throw new TypeError(`${path} は安全な整数である必要があります`);
+    if (!Number.isSafeInteger(value)) throw new WebMcpError('INVALID_INPUT', `${path} は安全な整数である必要があります`);
   }
 
   function assertWebMcpRevision(value, path) {
     if (!Number.isSafeInteger(value) || value < 0) {
-      throw new TypeError(`${path} は0以上の安全な整数である必要があります`);
+      throw new WebMcpError('INVALID_INPUT', `${path} は0以上の安全な整数である必要があります`);
     }
   }
 
   function assertCurrentWorkspaceRevision(expectedRevision) {
     if (expectedRevision !== workspaceRevision) {
-      throw new Error(`作業状態が更新されています。get_annotations で最新の revision (${workspaceRevision}) を取得して再実行してください`);
+      throw new WebMcpError('REVISION_CONFLICT', '作業状態が更新されたため変更しませんでした。get_annotationsで最新状態を取得し、変更内容を確認してください。');
     }
   }
 
   function assertWebMcpPoints(points, path, requiredLength, exactLength) {
-    if (!Array.isArray(points)) throw new TypeError(`${path}.points は整数配列である必要があります`);
+    if (!Array.isArray(points)) throw new WebMcpError('INVALID_INPUT', `${path}.points は整数配列である必要があります`);
     if (exactLength && points.length !== requiredLength) {
-      throw new TypeError(`${path}.points は正確に${requiredLength}要素である必要があります`);
+      throw new WebMcpError('INVALID_INPUT', `${path}.points は正確に${requiredLength}要素である必要があります`);
     }
     if (!exactLength && points.length < requiredLength) {
-      throw new TypeError(`${path}.points は${requiredLength}要素以上である必要があります`);
+      throw new WebMcpError('INVALID_INPUT', `${path}.points は${requiredLength}要素以上である必要があります`);
     }
-    if (points.length % 2 !== 0) throw new TypeError(`${path}.points は偶数要素である必要があります`);
+    if (points.length % 2 !== 0) throw new WebMcpError('INVALID_INPUT', `${path}.points は偶数要素である必要があります`);
     for (let index = 0; index < points.length; index++) {
       assertWebMcpSafeInteger(points[index], `${path}.points[${index}]`);
     }
@@ -1577,22 +1626,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function throwIfWebMcpExecutionAborted(signal) {
     if (!signal || !signal.aborted) return;
-    if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
-    throw new DOMException('WebMCP ツールの実行がキャンセルされました', 'AbortError');
+    throw signal.reason;
   }
 
   async function registerAnnoForgeWebMcpTools() {
     if (typeof document.modelContext?.registerTool !== 'function') return;
 
+    const nonNegativeInteger = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
     const urlImageInputSchema = {
       type: 'object',
       additionalProperties: false,
       required: ['expectedRevision', 'url'],
       properties: {
-        expectedRevision: {
-          type: 'integer',
-          minimum: 0
-        },
+        expectedRevision: nonNegativeInteger,
         url: {
           type: 'string',
           minLength: 1
@@ -1605,10 +1651,7 @@ document.addEventListener('DOMContentLoaded', () => {
       additionalProperties: false,
       required: ['expectedRevision', 'dataUrl'],
       properties: {
-        expectedRevision: {
-          type: 'integer',
-          minimum: 0
-        },
+        expectedRevision: nonNegativeInteger,
         dataUrl: {
           type: 'string',
           minLength: 1,
@@ -1654,10 +1697,7 @@ document.addEventListener('DOMContentLoaded', () => {
       additionalProperties: false,
       required: ['expectedRevision', 'draw'],
       properties: {
-        expectedRevision: {
-          type: 'integer',
-          minimum: 0
-        },
+        expectedRevision: nonNegativeInteger,
         draw: {
           type: 'array',
           items: {
@@ -1745,10 +1785,7 @@ document.addEventListener('DOMContentLoaded', () => {
       additionalProperties: false,
       required: ['expectedRevision'],
       properties: {
-        expectedRevision: {
-          type: 'integer',
-          minimum: 0
-        }
+        expectedRevision: nonNegativeInteger
       }
     };
 
@@ -1757,10 +1794,7 @@ document.addEventListener('DOMContentLoaded', () => {
       additionalProperties: false,
       required: ['expectedRevision', 'delivery'],
       properties: {
-        expectedRevision: {
-          type: 'integer',
-          minimum: 0
-        },
+        expectedRevision: nonNegativeInteger,
         delivery: {
           type: 'string',
           enum: ['data_url', 'download']
@@ -1772,7 +1806,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const outputObject = properties => ({
       type: 'object', additionalProperties: false, required: Object.keys(properties), properties
     });
-    const nonNegativeInteger = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
     const positiveInteger = { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER };
     const nonEmptyString = { type: 'string', minLength: 1 };
     const dimensions = { width: positiveInteger, height: positiveInteger };
@@ -1814,7 +1847,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     try {
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'open_image_from_url',
         title: 'URLから画像を開く',
         description: '現在の版が expectedRevision と一致する場合だけ、12 MiB以下のPNG、JPEG、WebPを、HTTPS URL（クロスオリジンの場合は配信元のCORS許可が必要）または同一オリジンのloopback HTTP URLから開きます。成功時は既存アノテーションと作図中の図形を消去します。',
@@ -1832,7 +1865,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'open_image_from_data_url',
         title: 'Data URLから画像を開く',
         description: '現在の版が expectedRevision と一致する場合だけ、呼び出し側から渡された12 MiB以下のPNG、JPEG、WebPのbase64 Data URLを開きます。会話の添付ファイルを直接読み取る機能ではありません。成功時は既存アノテーションと作図中の図形を消去します。',
@@ -1850,7 +1883,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'get_annotations',
         title: '現在のアノテーションを取得',
         description: '現在の AnnoForge ページにある全アノテーションを、元画像座標の draw 配列として読み取ります。画像データとファイル名は返しません。',
@@ -1892,10 +1925,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'get_image_preview',
         title: '現在の画像プレビューを取得',
-        description: '元画像の範囲に確定済みアノテーションを重ね、縦横比を維持したPNG Data URLとして返します。最大辺は既定1024px、指定可能範囲は64pxから2048pxで、元画像より拡大しません。表示のパン、ズーム、選択状態は結果へ影響しません。',
+        description: '元画像の範囲に確定済みアノテーションを重ね、縦横比を維持したPNG Data URLとして返します。最大辺は既定1024px、指定可能範囲は64pxから2048pxで、元画像より拡大しません。表示のパン、ズーム、選択状態は結果へ影響しません。図形の変形中はEDIT_IN_PROGRESSを返します。',
         inputSchema: previewInputSchema,
         outputSchema: outputObject(imageDataProperties),
         annotations: {
@@ -1906,15 +1939,15 @@ document.addEventListener('DOMContentLoaded', () => {
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
           const previewInput = validateWebMcpPreviewInput(input);
-          if (!loadedImage) throw new Error('プレビューを取得する前に画像を開いてください');
+          if (!loadedImage) throw new WebMcpError('IMAGE_NOT_LOADED', 'プレビューを取得する前に画像を開いてください');
           return createWebMcpImagePreview(previewInput.maxDimension, signal);
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'replace_annotations',
         title: 'アノテーションを置換',
-        description: '現在の版が expectedRevision と一致する場合だけ、全アノテーションを整数ピクセル座標の AnnoForge draw 配列で置き換えます。空配列は全消去です。全項目の検証後にだけ変更します。',
+        description: '現在の版が expectedRevision と一致する場合だけ、全アノテーションを整数ピクセル座標の AnnoForge draw 配列で置き換えます。直線の両端間の距離は5px以上、多角形のpointsは x, y の順に3組以上を並べた偶数長の配列が必要です。空配列は全消去です。全項目の検証後にだけ変更します。未確定の作図または図形の変形が進行中なら、現在の状態を保持してEDIT_IN_PROGRESSを返します。編集を確定または取り消し、get_annotationsで最新状態を確認してから再実行してください。',
         inputSchema: replaceAnnotationsInputSchema,
         outputSchema: outputObject({ replaced: { const: true }, ...resultState }),
         annotations: {
@@ -1936,7 +1969,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'start_annotations_json_download',
         title: 'アノテーションJSONの保存を開始',
         description: 'ブラウザーのダウンロード一覧でJSONを受け取るための保存要求です。expectedRevisionが現在の版と一致し、注釈がある場合に現在のdrawをJSONとして生成します。結果は要求送信までを示します。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
@@ -1944,7 +1977,7 @@ document.addEventListener('DOMContentLoaded', () => {
         outputSchema: outputObject({ ...downloadProperties, mimeType: { const: 'application/json' } }),
         annotations: {
           readOnlyHint: false,
-          untrustedContentHint: false,
+          untrustedContentHint: true,
           consequentialHint: false
         },
         execute: async (input, { signal } = {}) => {
@@ -1956,10 +1989,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'export_annotated_image',
         title: '注釈付き画像を出力',
-        description: 'PNG単体をData URLで取得するか、ブラウザーのダウンロード一覧へ保存要求する用途です。expectedRevisionが現在の版と一致する場合に元画像寸法で生成し、表示のパン・ズーム・選択状態は含めません。data_urlの結果は文字列、downloadの結果は要求送信の通知です。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
+        description: 'PNG単体をData URLで取得するか、ブラウザーのダウンロード一覧へ保存要求する用途です。expectedRevisionが現在の版と一致する場合に元画像寸法で生成し、表示のパン・ズーム・選択状態は含めません。図形の変形中はEDIT_IN_PROGRESSを返します。data_urlの結果は文字列、downloadの結果は要求送信の通知です。会話でPNG・JSONの実ファイルを受け取る用途にはprepare_annotation_exportを使用できます。',
         inputSchema: exportImageInputSchema,
         outputSchema: {
           type: 'object',
@@ -1977,7 +2010,7 @@ document.addEventListener('DOMContentLoaded', () => {
           throwIfWebMcpExecutionAborted(signal);
           const exportInput = validateWebMcpExportInput(input);
           assertCurrentWorkspaceRevision(exportInput.expectedRevision);
-          if (!loadedImage) throw new Error('注釈付き画像を出力する前に画像を開いてください');
+          if (!loadedImage) throw new WebMcpError('IMAGE_NOT_LOADED', '注釈付き画像を出力する前に画像を開いてください');
           throwIfWebMcpExecutionAborted(signal);
           if (exportInput.delivery === 'download') {
             return requestAnnotatedImageDownload(signal, exportInput.expectedRevision);
@@ -1997,10 +2030,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'prepare_annotation_export',
         title: 'PNGとJSONの受け渡しを準備',
-        description: '会話へ渡す元画像寸法PNGと完全な注釈JSONの実ファイルを準備します。同じexpectedRevisionの2ファイルのexportId・名前・バイト数・SHA-256を返します。read_annotation_exportの戻り値を同じJavaScript実行環境で復号・ファイル保存し、検証した絶対パスを最終回答の画像とファイルリンクに使えます。ブラウザーダウンロードは使いません。準備済み出力は1組で、新しい準備・画像や注釈の編集・release_annotation_export・ページ終了で無効になります。',
+        description: '会話へ渡す元画像寸法PNGと完全な注釈JSONの実ファイルを準備します。同じexpectedRevisionの2ファイルのexportId・名前・バイト数・SHA-256を返します。図形の変形中はEDIT_IN_PROGRESSを返します。read_annotation_exportの戻り値を同じJavaScript実行環境で復号・ファイル保存し、検証した絶対パスを最終回答の画像とファイルリンクに使えます。ブラウザーダウンロードは使いません。準備済み出力は1組で、新しい準備・画像や注釈の編集・release_annotation_export・ページ終了で無効になります。',
         inputSchema: downloadInputSchema,
         outputSchema: outputObject({
           outcome: { const: 'export_prepared' }, exportId: nonEmptyString, ...resultState,
@@ -2016,7 +2049,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'read_annotation_export',
         title: '準備済み出力のバイト列を取得',
         description: 'prepare_annotation_exportで準備したPNGまたはJSONの実バイト列を、指定範囲のbase64として返します。offsetからnextOffsetまでの各範囲を呼出しコード内で復号して順番に保存でき、eofが末尾を示します。保存したファイルのバイト数・SHA-256を準備結果と照合します。base64はモデルによる転記ではなくプログラムで扱うデータです。',
@@ -2026,7 +2059,7 @@ document.addEventListener('DOMContentLoaded', () => {
           properties: {
             exportId: { type: 'string', minLength: 1 },
             format: { type: 'string', enum: ['png', 'json'] },
-            offset: { type: 'integer', minimum: 0 },
+            offset: nonNegativeInteger,
             maxBytes: { type: 'integer', minimum: 1, maximum: WEBMCP_EXPORT_MAX_CHUNK_BYTES, default: WEBMCP_EXPORT_CHUNK_BYTES }
           }
         },
@@ -2040,16 +2073,16 @@ document.addEventListener('DOMContentLoaded', () => {
         execute: async (input, { signal } = {}) => readAnnotationExport(validateWebMcpExportReference(input, true), signal)
       });
 
-      await document.modelContext.registerTool({
+      await registerWebMcpTool({
         name: 'release_annotation_export',
         title: '準備済み出力を解放',
-        description: '指定したexportIdが現在の準備済み出力と一致する場合だけメモリーから解放します。画像と注釈、取得済みファイルは変更しません。既に解放済みの場合はreleased:falseを返します。',
+        description: '指定したexportIdが現在の準備済み出力と一致する場合だけメモリーから解放します。結果には入力のexportIdと解放できたかを示すreleasedを返します。未発行・無効・解放済みのIDではreleasedはfalseです。画像と注釈、取得済みファイルは変更しません。',
         inputSchema: {
           type: 'object', additionalProperties: false, required: ['exportId'],
           properties: { exportId: { type: 'string', minLength: 1 } }
         },
         outputSchema: outputObject({ exportId: nonEmptyString, released: { type: 'boolean' } }),
-        annotations: { readOnlyHint: false, untrustedContentHint: false, consequentialHint: false },
+        annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: false },
         execute: async (input, { signal } = {}) => {
           throwIfWebMcpExecutionAborted(signal);
           const { exportId } = validateWebMcpExportReference(input);
@@ -2100,12 +2133,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // 表示用ステージではなく、元画像座標の確定モデルから出力専用シーンを生成する。
   // これにより、パン、ズーム、画面サイズ、ドラフト、選択表示は出力へ混入しない。
   function createAnnotatedImageCanvas({ maxDimension } = {}) {
-    if (!loadedImage) throw new Error('注釈付き画像を生成する前に画像を開いてください');
+    if (!loadedImage) throw new WebMcpError('IMAGE_NOT_LOADED', '注釈付き画像を生成する前に画像を開いてください');
+    assertNoAnnotationTransformInProgress();
 
     const originalWidth = loadedImage.naturalWidth;
     const originalHeight = loadedImage.naturalHeight;
     if (!Number.isSafeInteger(originalWidth) || originalWidth <= 0 || !Number.isSafeInteger(originalHeight) || originalHeight <= 0) {
-      throw new Error('元画像の寸法を取得できません');
+      throw new WebMcpError('OUTPUT_GENERATION_FAILED', '元画像の寸法を取得できません');
     }
 
     const outputScale = maxDimension === undefined
@@ -2147,12 +2181,13 @@ document.addEventListener('DOMContentLoaded', () => {
         pixelRatio: 1
       });
       if (!canvas || canvas.width !== width || canvas.height !== height) {
-        throw new Error('要求した寸法のキャンバスを生成できません');
+        throw new WebMcpError('OUTPUT_GENERATION_FAILED', '要求した寸法のキャンバスを生成できません');
       }
       return { canvas, width, height };
     } catch (error) {
-      const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
-      throw new Error(`注釈付き画像を生成できません${detail}`);
+      if (error instanceof WebMcpError) throw error;
+      console.error('注釈付き画像の描画に失敗しました:', error);
+      throw new WebMcpError('OUTPUT_GENERATION_FAILED', '注釈付き画像を生成できません');
     } finally {
       if (renderStage) renderStage.destroy();
     }
@@ -2198,7 +2233,7 @@ document.addEventListener('DOMContentLoaded', () => {
     throw new Error(`未対応のアノテーション種別です: ${model.type}`);
   }
 
-  // 回転角は既存JSONの対象外なので、矩形と円だけ確定済み表示ノードから引き継ぐ。
+  // 描画前に変形中でないことを確認済み。回転角はJSONの対象外なので表示ノードから引き継ぐ。
   function getFinalizedShapeRotation(model) {
     if (model.type !== 'rectangle' && model.type !== 'circle') return 0;
     const node = annotationsLayer.findOne((candidate) => candidate.getAttr('shapeId') === model.id);
@@ -2212,10 +2247,10 @@ document.addEventListener('DOMContentLoaded', () => {
       dataUrl = canvas.toDataURL('image/png');
     } catch (error) {
       console.error(failureMessage, error);
-      throw new Error(failureMessage);
+      throw new WebMcpError('OUTPUT_GENERATION_FAILED', failureMessage);
     }
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
-      throw new Error(failureMessage);
+      throw new WebMcpError('OUTPUT_GENERATION_FAILED', failureMessage);
     }
     return dataUrl;
   }
@@ -2225,14 +2260,14 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         canvas.toBlob((blob) => {
           if (!blob || blob.size === 0) {
-            reject(new Error('注釈付き画像をPNGとして保存できません'));
+            reject(new WebMcpError('OUTPUT_GENERATION_FAILED', '注釈付き画像をPNGとして保存できません'));
             return;
           }
           resolve(blob);
         }, 'image/png');
       } catch (error) {
         console.error('注釈付き画像のPNG変換に失敗しました:', error);
-        reject(new Error('注釈付き画像をPNGとして保存できません'));
+        reject(new WebMcpError('OUTPUT_GENERATION_FAILED', '注釈付き画像をPNGとして保存できません'));
       }
     });
   }
@@ -2242,7 +2277,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const annotationCount = shapes.length;
     const json = JSON.stringify(getAnnotationDocument(), null, 2);
     const blob = new Blob([json], { type: 'application/json' });
-    if (blob.size === 0) throw new Error('アノテーションJSONを生成できません');
+    if (blob.size === 0) throw new WebMcpError('OUTPUT_GENERATION_FAILED', 'アノテーションJSONを生成できません');
     return {
       blob,
       filename: makeFileName(loadedImageName, 'annotations.json', '-annotations.json'),
@@ -2256,11 +2291,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function requestAnnotationsJsonDownload(expectedRevision, signal) {
     if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
     throwIfWebMcpExecutionAborted(signal);
-    if (shapes.length === 0) throw new Error('アノテーションJSONを保存する前にアノテーションを作成してください');
+    if (shapes.length === 0) throw new WebMcpError('NO_ANNOTATIONS', 'アノテーションJSONを保存する前にアノテーションを作成してください');
     const artifact = createAnnotationsJsonArtifact();
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== artifact.revision) {
-      throw new Error('JSONの生成中に作業状態が更新されました。最新のrevisionで再実行してください');
+      throw new WebMcpError('REVISION_CONFLICT', 'JSONの生成中に作業状態が更新されました。get_annotationsで最新状態を取得し、変更内容を確認してください。');
     }
     if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
     return requestBrowserDownload(artifact);
@@ -2268,7 +2303,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function assertDecodedImageSize(image, width, height, label) {
     if (image.naturalWidth !== width || image.naturalHeight !== height) {
-      throw new Error(`${label}を要求した寸法で生成できません`);
+      throw new WebMcpError('OUTPUT_GENERATION_FAILED', `${label}を要求した寸法で生成できません`);
     }
   }
 
@@ -2279,14 +2314,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const { canvas, width, height } = createAnnotatedImageCanvas();
     const dataUrl = createPngDataUrl(canvas, '注釈付き画像をPNGとして生成できません');
     if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
-      throw new RangeError('注釈付き画像のData URLが12 MiBを超えています。prepare_annotation_exportとread_annotation_exportで分割取得するか、保存完了を確認できるクライアントでdownloadを使用してください');
+      throw new WebMcpError('SIZE_LIMIT_EXCEEDED', '注釈付き画像のData URLが12 MiBを超えています。prepare_annotation_exportとread_annotation_exportで分割取得するか、保存完了を確認できるクライアントでdownloadを使用してください');
     }
     const image = await AnnoForgeImageLoading.decodeImage(dataUrl, signal);
     assertDecodedImageSize(image, width, height, '注釈付き画像');
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== revision) {
-      throw new Error('画像の生成中に作業状態が更新されました。最新のrevisionで再実行してください');
+      throw new WebMcpError('REVISION_CONFLICT', '画像の生成中に作業状態が更新されました。get_annotationsで最新状態を取得し、変更内容を確認してください。');
     }
+    assertNoAnnotationTransformInProgress();
     return {
       dataUrl,
       width,
@@ -2303,14 +2339,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const { canvas, width, height } = createAnnotatedImageCanvas({ maxDimension });
     const dataUrl = createPngDataUrl(canvas, '画像プレビューをPNGとして生成できません');
     if (dataUrl.length > WEBMCP_MAX_DATA_URL_LENGTH) {
-      throw new RangeError('画像プレビューのData URLが12 MiBを超えています。maxDimensionを小さくしてください');
+      throw new WebMcpError('SIZE_LIMIT_EXCEEDED', '画像プレビューのData URLが12 MiBを超えています。maxDimensionを小さくしてください');
     }
     const image = await AnnoForgeImageLoading.decodeImage(dataUrl, signal);
     assertDecodedImageSize(image, width, height, '画像プレビュー');
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== revision) {
-      throw new Error('プレビューの生成中に作業状態が更新されました。再実行してください');
+      throw new WebMcpError('REVISION_CONFLICT', 'プレビューの生成中に作業状態が更新されました。get_annotationsで最新状態を取得し、変更内容を確認してください。');
     }
+    assertNoAnnotationTransformInProgress();
     return {
       revision,
       annotationCount,
@@ -2330,9 +2367,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const blob = await createPngBlob(canvas);
     throwIfWebMcpExecutionAborted(signal);
     if (workspaceRevision !== revision) {
-      throw new Error('画像の生成中に作業状態が更新されました。最新のrevisionで再実行してください');
+      throw new WebMcpError('REVISION_CONFLICT', '画像の生成中に作業状態が更新されました。get_annotationsで最新状態を取得し、変更内容を確認してください。');
     }
     if (expectedRevision !== undefined) assertCurrentWorkspaceRevision(expectedRevision);
+    assertNoAnnotationTransformInProgress();
     return {
       blob,
       filename: makeFileName(loadedImageName, 'annotated.png', '-annotated.png'),
@@ -2348,6 +2386,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function requestAnnotatedImageDownload(signal, expectedRevision) {
     const artifact = await createAnnotatedImageArtifact(signal, expectedRevision);
     throwIfWebMcpExecutionAborted(signal);
+    assertNoAnnotationTransformInProgress();
     return requestBrowserDownload(artifact);
   }
 
@@ -2366,6 +2405,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const [pngMetadata, jsonMetadata] = await Promise.all([describeExportArtifact(png), describeExportArtifact(json)]);
     throwIfWebMcpExecutionAborted(signal);
     assertCurrentWorkspaceRevision(expectedRevision);
+    assertNoAnnotationTransformInProgress();
     const exportId = crypto.randomUUID();
     preparedAnnotationExport = { exportId, revision: expectedRevision, png, json };
     return {
@@ -2376,7 +2416,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getPreparedAnnotationExport(exportId) {
     if (!preparedAnnotationExport || preparedAnnotationExport.exportId !== exportId) {
-      throw new Error('出力は無効または解放済みです。最新のrevisionでprepare_annotation_exportを再実行してください');
+      throw new WebMcpError('EXPORT_UNAVAILABLE', '出力は無効または解放済みです。get_annotationsで最新状態を確認し、prepare_annotation_exportを再実行してください。');
     }
     assertCurrentWorkspaceRevision(preparedAnnotationExport.revision);
     return preparedAnnotationExport;
@@ -2386,7 +2426,7 @@ document.addEventListener('DOMContentLoaded', () => {
     throwIfWebMcpExecutionAborted(signal);
     const prepared = getPreparedAnnotationExport(exportId);
     const artifact = prepared[format];
-    if (offset >= artifact.byteLength) throw new RangeError('input.offset はファイルのバイト数未満である必要があります');
+    if (offset >= artifact.byteLength) throw new WebMcpError('INVALID_INPUT', 'input.offset はファイルのバイト数未満である必要があります');
     const nextOffset = Math.min(offset + maxBytes, artifact.byteLength);
     const bytes = new Uint8Array(await artifact.blob.slice(offset, nextOffset).arrayBuffer());
     throwIfWebMcpExecutionAborted(signal);
@@ -2422,7 +2462,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       if (anchor) anchor.remove();
       if (url) URL.revokeObjectURL(url);
-      throw new Error('ブラウザーへダウンロード要求を送信できません');
+      console.error('ブラウザーへのダウンロード要求に失敗しました:', error);
+      throw new WebMcpError('DOWNLOAD_REQUEST_FAILED', 'ブラウザーへダウンロード要求を送信できません');
     }
 
     setTimeout(() => {
@@ -2486,6 +2527,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function replaceWebMcpAnnotations(draw) {
+    if (draft) {
+      throw new WebMcpError('EDIT_IN_PROGRESS', '図形を作図中のため注釈を置換しませんでした。作図を確定または取り消し、get_annotationsで最新状態を確認してから再実行してください。');
+    }
+    assertNoAnnotationTransformInProgress();
     const previous = {
       annotationsLayer, guidesLayer, shapes: shapes.slice(), selectedShapeId, transformer, draft, snapMarker,
       listNodes: Array.from(annotationList.childNodes), jsonText: jsonDisplay.textContent
@@ -2508,7 +2553,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Stage.addは同期描画する。元のノードを残し、生成・描画の失敗で再生成を必要としない。
       stage.add(nextLayer);
       nextLayer.zIndex(previous.annotationsLayer.zIndex());
-      nextGuidesLayer = new Konva.Layer({ listening: false });
+      nextGuidesLayer = new Konva.Layer();
       stage.add(nextGuidesLayer);
       stateChanged = true;
       annotationsLayer = nextLayer;

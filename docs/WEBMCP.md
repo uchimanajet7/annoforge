@@ -32,13 +32,13 @@ WebMCP ツールと人向け UI は、同じブラウザーセッションの画
 
 AnnoForge は、`document.modelContext.registerTool()` が利用可能なページでツールを登録する。[ChatGPT Site tools](https://learn.chatgpt.com/docs/webmcp) の組み込みブラウザーは、トップレベルページと同一・別オリジンのiframe内のツールを検出する。各フレームはセキュアコンテキストである必要があり、提供元オリジンへのアクセスはブラウザーが確認する。エージェントによる検出に `exposedTo` の指定は不要。AnnoForgeのローカル確認手順はトップレベルページを使用する。
 
-外部または利用者指定の画像・ファイル名に由来するデータを返す `get_image_preview`、`export_annotated_image`、`prepare_annotation_export`、`read_annotation_export` は、`untrustedContentHint: true` として登録する。他のツールは、返却値を AnnoForge が生成する検証済みの状態・メタデータに限定し、`untrustedContentHint: false` とする。
+外部または利用者指定の画像・ファイル名に由来するデータを返す `get_image_preview`、`start_annotations_json_download`、`export_annotated_image`、`prepare_annotation_export`、`read_annotation_export` は、`untrustedContentHint: true` として登録する。`release_annotation_export` も、呼び出し側が渡した `exportId` をそのまま返すため `true` とする。他の4ツールは `untrustedContentHint: false` とする。
 
 `open_image_from_url`、`open_image_from_data_url`、`replace_annotations` は、既存の画像・注釈を元に戻せない形で置き換えるため `consequentialHint: true` とする。他の7ツールは `false` を明示する。このヒントはクライアントが副作用を判断するための情報であり、利用者の同意や `expectedRevision` の検証を代替しない。[Chromeのannotations説明](https://developer.chrome.com/docs/ai/webmcp/imperative-api#tool-annotations-optional)を根拠とする。
 
-全10ツールに、4章の成功結果を表す `outputSchema` を登録する。ルートはオブジェクトとし、定義した結果フィールドを必須にして追加フィールドを許可しない。画像未読込み時の寸法は `null`、読込み済みの寸法は正の整数とする。`export_annotated_image` はData URL返却とダウンロード要求の2形式を `oneOf` で区別し、ダウンロード結果の `completionVerified` は常に `false` とする。`get_annotations.draw` は人向けUIから取得した図形も含むため、3.2.1の置換入力と3.2.2の出力を区別する。現在の `outputSchema` は維持し、入力の最小寸法・線幅・安全な整数の範囲・平行四辺形の要素数制限を出力へ再適用しない。
+全10ツールに、4章の成功結果と2.4のエラー結果を `oneOf` で区別する `outputSchema` を登録する。ルートはオブジェクトとし、それぞれの分岐で定義した結果フィールドを必須にして追加フィールドを許可しない。画像未読込み時の寸法は `null`、読込み済みの寸法は正の整数とする。`export_annotated_image` はData URL返却とダウンロード要求の2形式を `oneOf` で区別し、ダウンロード結果の `completionVerified` は常に `false` とする。`get_annotations.draw` は人向けUIから取得した図形も含むため、3.2.1の置換入力と3.2.2の出力を区別する。成功結果のスキーマは維持し、入力の最小寸法・線幅・安全な整数の範囲・平行四辺形の要素数制限を出力へ再適用しない。
 
-`consequentialHint` と `outputSchema` は [WebMCP仕様案の任意項目](https://webmachinelearning.github.io/webmcp/#dictdef-modelcontexttool)だが、AnnoForgeでは上記のとおり定義する。出力スキーマは成功結果の契約であり、エラーは従来どおりPromiseの拒否で返す。参照仕様は2026年11月13日付のDraft Community Group Reportで、正式なW3C標準ではない。クライアント側の公開状況と確認範囲は2.6を参照する。
+`consequentialHint` と `outputSchema` は [WebMCP仕様案の任意項目](https://webmachinelearning.github.io/webmcp/#dictdef-modelcontexttool)だが、AnnoForgeでは上記のとおり定義する。アプリ側の失敗は正常解決したPromiseのエラー結果で伝え、WebMCPから渡された実行signalによる取消しはPromiseの拒否として伝える。参照仕様は2026年11月13日付のDraft Community Group Reportで、正式なW3C標準ではない。クライアント側の公開状況と確認範囲は2.6を参照する。
 
 ### 2.2 作業状態と revision
 
@@ -54,9 +54,13 @@ AnnoForge は、`document.modelContext.registerTool()` が利用可能なペー�
 
 `expectedRevision` を受け取るツールは、その値が現在の `revision` と一致する場合だけ処理する。非同期処理は、結果を作業状態へ反映する直前にも一致を確認する。
 
-revision が一致しない場合、ツールはエラーを返し、作業状態を変更しない。呼び出し側は `get_annotations` で最新の `revision` を取得してから再実行する。
+revision が一致しない場合、ツールはエラーを返し、作業状態を変更しない。呼び出し側は `get_annotations` で最新状態を取得し、変更内容を確認してから再実行する。revisionだけを更新した自動再試行は行わない。
 
 準備済みのPNG・JSONは、revisionが変化すると無効になる。出力の準備・読取り・解放自体はrevisionを変更しない。選択や表示倍率だけの変更では、準備済み出力を無効にしない。
+
+`replace_annotations` は、未確定の作図または図形の変形が進行中なら、空配列による全消去も含めて `EDIT_IN_PROGRESS` で拒否する。作図途中の状態、確定済み注釈、revision、準備済み出力は変更しない。呼出し側は編集を確定または取り消した後、`get_annotations` で最新状態を確認してから再実行する。
+
+PNG生成は、描画前と非同期処理後の返却・保持・ダウンロード要求前に変形状態を確認し、変形中なら `EDIT_IN_PROGRESS` で拒否する。対象は `get_image_preview`、`export_annotated_image`、`prepare_annotation_export` と画面の画像保存。変形が確定してrevisionが変わった場合は、既存のrevision検証で競合を拒否する。未確定の新規作図は従来どおりPNGへ含めず、作図そのものは保持する。変形状態には[Konvaの `isTransforming()`](https://konvajs.org/api/Konva.Transformer.html#isTransforming)を使用する。
 
 画像読込みは人向けのファイル選択・ドロップ・URL入力と同じ処理管理を使う。有効な新しい読込みが開始されると、前の読込みを取消す。入力不正、事前のrevision不一致、入力ダイアログを開くだけの操作では、進行中の読込みを取消さない。反映直前にも処理の有効性、revisionと作図途中・変形途中の編集を確認し、読込み開始後の変更を消去しない。失敗・取消し・競合では作業状態を保持する。
 
@@ -68,21 +72,45 @@ revision が一致しない場合、ツールはエラーを返し、作業状�
 - 必須フィールドがない入力を拒否する。
 - 定義されていないフィールドを含む入力を拒否する。
 - 数値フィールドは有限数とする。`draw` の座標、寸法、半径、点配列の要素は安全な整数とし、`thickness` は有限数とする。
-- `revision` と `expectedRevision` は0以上の安全な整数とする。
+- `revision` と `expectedRevision` は0以上の安全な整数とする。`expectedRevision` を受け取る6ツールすべての入力スキーマに、最小値0と最大値9007199254740991（`Number.MAX_SAFE_INTEGER`）を明示する。
 - ツールは `AbortSignal` によるキャンセルを受け付ける。
 
 ### 2.4 共通エラー動作
 
-次の場合、ツールはエラーを返す。
+アプリ側の失敗は全10ツール共通で次のJSONオブジェクトを返す。`error`、`code`、`message` はAnnoForge独自の契約であり、WebMCPの必須フィールドではない。
 
-- 入力がスキーマに一致しない
-- `expectedRevision` が現在の `revision` と一致しない
-- 実行がキャンセルされた
-- 画像の取得、デコード、描画、または PNG 変換に失敗した
-- 出力を要求された寸法で生成できない
-- ツール固有の事前条件を満たさない
+```json
+{
+  "error": {
+    "code": "REVISION_CONFLICT",
+    "message": "作業状態が更新されたため変更しませんでした。get_annotationsで最新状態を取得し、変更内容を確認してください。"
+  }
+}
+```
 
-エラー時は画像とアノテーションを変更しない。ダウンロードを行うツールは、出力の生成と revision の再確認が完了するまでブラウザーへダウンロードを要求しない。
+| code | 意味と対処 |
+| --- | --- |
+| `INVALID_INPUT` | 入力形式・値が不正。messageで示した項目を修正する。 |
+| `REVISION_CONFLICT` | revisionまたは読込み中の作業状態が変化した。最新状態と変更内容を確認する。 |
+| `IMAGE_NOT_LOADED` | 画像が必要な操作の前に画像を開く。 |
+| `NO_ANNOTATIONS` | 注釈JSONのダウンロードには注釈が必要。 |
+| `EXPORT_UNAVAILABLE` | 出力が無効または解放済み。最新状態で出力を準備し直す。 |
+| `IMAGE_LOAD_FAILED` | 画像の取得またはデコードに失敗した。HTTPステータスは取得できた場合だけ示し、ネットワークとCORSのどちらが原因か不明なら断定しない。 |
+| `SIZE_LIMIT_EXCEEDED` | 入力またはData URLの容量超過。messageに従って入力・寸法・取得方式を見直す。 |
+| `EDIT_IN_PROGRESS` | 注釈置換時の作図・変形中、または画像読込み・PNG生成時の変形中。編集を確定または取り消し、最新状態を確認して再実行する。 |
+| `OPERATION_SUPERSEDED` | 別の画像読込みが開始されたため中断した。現在の状態を確認する。 |
+| `OPERATION_CANCELLED` | ページ側で画像読込みを中断した。現在の状態を確認する。 |
+| `OUTPUT_GENERATION_FAILED` | 描画・PNG/JSON変換・寸法検証に失敗した。 |
+| `DOWNLOAD_REQUEST_FAILED` | ブラウザーへのダウンロード要求送信自体に失敗した。許可待ちや保存未確認を意味しない。 |
+| `INTERNAL_ERROR` | 想定外の内部エラー。状態保持を断定せず、`get_annotations` で現在の状態を確認する。 |
+
+呼出し側は、Promiseの解決を作業成功とみなさず、成功フィールドの参照前に `error` の有無を確認する。成功とエラーのフィールドを同じ結果に混在させない。既知の失敗は発生箇所で分類し、例外の文言や `TypeError` という名前だけでは分類しない。AIへ返す説明には未検証の入力文字列、任意の追加キー、内部の例外メッセージやスタックを含めない。想定外の例外の詳細はページのコンソールに記録し、戻り値には固定の説明だけを含める。
+
+WebMCPの実行signalが中断済みなら、その取消理由をそのまま拒否理由として伝える。取消理由の型・真偽値・`AbortError` という名前では判定しない。別の読込みによる中断は実行signalの取消しと区別して `OPERATION_SUPERSEDED` を返す。
+
+入力不正・事前条件の不成立・競合・反映前の取消しは、その操作による画像・注釈の変更を行わない。注釈置換の失敗時は元の状態を復元する。想定外の内部エラー全般で状態保持を保証するメッセージは返さない。ダウンロードを行うツールは、出力の生成と revision の再確認が完了するまでブラウザーへダウンロードを要求しない。要求後の許可ダイアログ・複数ダウンロード許可待ちはアプリの実行エラーに変換せず、`download_requested` と `completionVerified: false` を維持する。
+
+根拠: [WebMCPのアプリ側エラー返却](https://webmachinelearning.github.io/webmcp/#tool-execution-error)、[Google公式ガイドの例外と構造化エラー](https://github.com/GoogleChrome/modern-web-guidance-src/blob/main/guides/webmcp/agentic-javascript-tools/guide.md#handling-errors-in-execute)、[AbortSignalの取消理由](https://dom.spec.whatwg.org/#interface-abortsignal)、[CORSエラーの詳細公開制限](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS#functional_overview)。
 
 ### 2.5 出力結果とフォールバックの境界
 
@@ -315,7 +343,7 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 ### 4.5 `replace_annotations`
 
-現在の全アノテーションを指定した `draw` で置換する。
+現在の全アノテーションを指定した `draw` で置換する。公開するツール説明には、直線の両端間の距離が元画像上で5px以上であることと、多角形の `points` が3組以上の x, y を並べた偶数長の配列であることを明記する。
 
 入力:
 
@@ -433,7 +461,7 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 |---|---|---|
 | `exportId` | string | 有効な準備済み出力の識別子 |
 | `format` | string | `png` または `json` |
-| `offset` | integer | 0以上、対象ファイルのバイト数未満の安全な整数 |
+| `offset` | integer | 入力スキーマは `expectedRevision` と同じく0以上9007199254740991以下の整数。読取り時は対象ファイルのバイト数未満に限る |
 | `maxBytes` | integer | 1以上1,048,576以下。通常は262,144（256 KiB）を明示指定 |
 
 結果は `exportId`、`revision`、`format`、`offset`、`nextOffset`、`eof`、`base64`。対象範囲は `[offset, nextOffset)`、`eof` は `nextOffset` がファイル末尾に達した場合だけ `true`。
@@ -444,7 +472,7 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 
 ### 4.10 `release_annotation_export`
 
-入力は `{ "exportId": "<準備時の識別子>" }`。対象が現在の準備済み出力と一致する場合だけ解放し、`{ "exportId": "...", "released": true }` を返す。既に無効・解放済みなら `released: false` を返す。画像・注釈、受信済みのファイルは変更しない。
+入力は `{ "exportId": "<準備時の識別子>" }`。対象が現在の準備済み出力と一致する場合だけ解放し、`released: true` を返す。未発行・無効・解放済みの識別子では `released: false` を返す。どちらの結果にも、入力の `exportId` をそのまま含める。画像・注釈、受信済みのファイルは変更しない。
 
 ### 4.11 クライアント側の受信と会話への添付
 
@@ -457,7 +485,7 @@ scale = min(1, maxDimension / max(originalWidth, originalHeight))
 以下は、CodexのCUA REPLで取得済みの `tab` を使う接続例。`tab` の取得は、その実行環境が返すブラウザーAPIの説明に従う。モジュールを配置済みの開発・連携環境向けの例であり、Webアプリの利用者にリポジトリ取得やNode.jsのインストールを要求するものではない。パスは実際に許可された絶対パスへ置換する。まず `fetchTools()` と `siteTools.description()` で現在の登録一覧を確認し、下記 `toolNames` の値を一覧にある完全な名前へ置換する。クライアントが付与する接尾辞を推測せず、ページ遷移・再読込み後は一覧とハンドルを取得し直す。
 
 ```javascript
-const { receiveAnnotationExport } = await import(
+const { receiveAnnotationExport, assertToolSuccess } = await import(
   '/absolute/path/to/annoforge/scripts/tools/web/receive-annotation-export.mjs'
 );
 const webmcp = await tab.capabilities.get('webmcp');
@@ -476,7 +504,7 @@ const callTool = async (name, input) => {
   const result = await siteTools.call(toolNames[name], input);
   return JSON.parse(result);
 };
-const state = await callTool('get_annotations', {});
+const state = assertToolSuccess(await callTool('get_annotations', {}));
 const received = await receiveAnnotationExport({
   callTool,
   expectedRevision: state.revision,
@@ -488,11 +516,13 @@ nodeRepl.write(received);
 
 受信処理は次を実行する。
 
-1. 出力を準備し、メタデータとファイル名を検証する。
+1. 出力を準備し、エラー結果でないことを確認してからメタデータとファイル名を検証する。
 2. 指定ディレクトリの中に一意な子ディレクトリを作成し、既存ファイルを上書きせずPNG・JSONを256 KiBずつ保存する。
-3. 出力ID、revision、バイト範囲、base64、終端を各読取りで検証する。
+3. 各読取りでエラー結果を先に確認し、出力ID、revision、バイト範囲、base64、終端を検証する。
 4. 保存後に両ファイルのバイト数とSHA-256、PNGのシグネチャ・寸法・チャンクCRC・終端、JSONのUTF-8・構文・注釈数を検証する。
-5. 準備済み出力を解放する。受信失敗時は、この呼出しが作成した不完全ファイルだけを削除する。
+5. 準備済み出力を解放し、解放結果のエラーも判別する。受信失敗時は、この呼出しが作成した不完全ファイルだけを削除する。
+
+`assertToolSuccess(result)` は正常結果をそのまま返し、エラー結果なら `code` と `message` を保持した例外を投げる。受信モジュールも準備・読取り・解放でこの判定を行い、具体的な原因を汎用の形式エラーへ置き換えない。解放だけが失敗した場合は、ファイル取得の成功を維持して `releaseWarning` に記録する。
 
 成功結果は `outcome: "files_verified"`、`revision`、`annotationCount`、`directory`、メタデータ・絶対 `path` を含む `files.png` / `files.json`、最終回答に使える `markdown`。`markdown` は検証済みPNGの画像埋込みと、PNG・JSONそれぞれのファイルリンクを含む。パス中の空白・括弧・URLの区切り文字は符号化し、利用者由来のファイル名をMarkdownとして解釈させない。[CommonMarkの画像・リンク構文](https://spec.commonmark.org/0.31.2/#images)を使用する。解放だけに失敗した場合は `releaseWarning` も返し、検証済みファイルは残す。保存は [Node.jsのファイルAPI](https://nodejs.org/api/fs.html)、整合性確認は [SHA-256](https://nodejs.org/api/crypto.html#cryptocreatehashalgorithm-options) と [PNGチャンクのCRC](https://nodejs.org/api/zlib.html#zlibcrc32data-value) を使用する。
 

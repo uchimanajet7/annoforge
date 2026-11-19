@@ -10,6 +10,20 @@ function requireValue(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+export function assertToolSuccess(result) {
+  if (result !== null && typeof result === 'object' && Object.hasOwn(result, 'error')) {
+    const error = result.error;
+    requireValue(error !== null && typeof error === 'object' && !Array.isArray(error) &&
+      typeof error.code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(error.code) &&
+      typeof error.message === 'string' && error.message.length > 0, 'WebMCPのエラー結果が不正です');
+    const failure = new Error(`${error.code}: ${error.message}`);
+    failure.name = 'WebMcpToolError';
+    failure.code = error.code;
+    throw failure;
+  }
+  return result;
+}
+
 function validateManifest(result, expectedRevision) {
   requireValue(result?.outcome === 'export_prepared', 'PNG/JSONの出力準備結果ではありません');
   requireValue(typeof result.exportId === 'string' && result.exportId.length > 0, 'exportIdがありません');
@@ -91,9 +105,10 @@ export async function receiveAnnotationExport({ callTool, expectedRevision, outp
   let directory;
   let result;
   let failure;
+  let failed = false;
   const createdFiles = [];
   try {
-    manifest = await callTool('prepare_annotation_export', { expectedRevision });
+    manifest = assertToolSuccess(await callTool('prepare_annotation_export', { expectedRevision }));
     validateManifest(manifest, expectedRevision);
     await mkdir(outputDirectory, { recursive: true });
     directory = await mkdtemp(join(await realpath(outputDirectory), 'annoforge-export-'));
@@ -106,9 +121,9 @@ export async function receiveAnnotationExport({ callTool, expectedRevision, outp
       try {
         let offset = 0;
         while (offset < artifact.byteLength) {
-          const chunk = await callTool('read_annotation_export', {
+          const chunk = assertToolSuccess(await callTool('read_annotation_export', {
             exportId: manifest.exportId, format, offset, maxBytes: CHUNK_BYTES
-          });
+          }));
           const bytes = validateChunk(chunk, manifest, format, offset);
           await file.writeFile(bytes);
           offset = chunk.nextOffset;
@@ -125,6 +140,7 @@ export async function receiveAnnotationExport({ callTool, expectedRevision, outp
       markdown: createExportMarkdown(files)
     };
   } catch (error) {
+    failed = true;
     failure = error;
     // 削除するのは、この呼出しが新規作成した不完全ファイルだけ。
     const cleanupErrors = [];
@@ -138,16 +154,16 @@ export async function receiveAnnotationExport({ callTool, expectedRevision, outp
   } finally {
     if (typeof manifest?.exportId === 'string' && manifest.exportId) {
       try {
-        const release = await callTool('release_annotation_export', { exportId: manifest.exportId });
+        const release = assertToolSuccess(await callTool('release_annotation_export', { exportId: manifest.exportId }));
         requireValue(release?.exportId === manifest.exportId && typeof release.released === 'boolean', '出力の解放結果が不正です');
       } catch (releaseError) {
         // ファイル取得の成否と、ページ内バッファの解放失敗を混同しない。
-        if (failure) failure = new AggregateError([failure, releaseError], '出力取得と準備済みデータの解放に失敗しました');
+        if (failed) failure = new AggregateError([failure, releaseError], '出力取得と準備済みデータの解放に失敗しました');
         else result.releaseWarning = String(releaseError);
       }
     }
   }
-  if (failure) throw failure;
+  if (failed) throw failure;
   // 呼出し側はPNGを表示確認し、markdownを最終回答の本文に含める。
   // この関数は会話レンダラーを操作しないため、保存だけで添付済みとはしない。
   return result;

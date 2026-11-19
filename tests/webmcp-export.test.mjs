@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
-import { receiveAnnotationExport } from '../scripts/tools/web/receive-annotation-export.mjs';
+import { receiveAnnotationExport, assertToolSuccess } from '../scripts/tools/web/receive-annotation-export.mjs';
 
 const tmpRoot = process.env.ANNOFORGE_TEST_TMP_DIR || tmpdir();
 assert.ok(isAbsolute(tmpRoot), 'ANNOFORGE_TEST_TMP_DIRには絶対パスを指定してください');
@@ -244,4 +244,73 @@ test('相対パスはツール実行前に拒否する', async () => {
   const tools = mockTools();
   await assert.rejects(receiveAnnotationExport({ callTool: tools.callTool, expectedRevision: 7, outputDirectory: 'relative' }));
   assert.equal(tools.calls.length, 0);
+});
+
+for (const failedTool of ['get_annotations', 'prepare_annotation_export', 'read_annotation_export']) {
+  test(`接続例は${failedTool}のエラーJSONのcodeと理由を保持し、不完全ファイルを残さない`, async t => {
+    const outputDirectory = await outputRoot(t);
+    const calls = [];
+    await assert.rejects(runConnectionExample(outputDirectory, (name, result) => {
+      calls.push(name);
+      return JSON.stringify(name === failedTool
+        ? { error: { code: 'REVISION_CONFLICT', message: '作業状態が更新されました' } } : result);
+    }), error => error.code === 'REVISION_CONFLICT' && /作業状態が更新/.test(error.message));
+    assert.deepEqual(await readdir(outputDirectory), []);
+    if (failedTool === 'read_annotation_export') assert.equal(calls.at(-1), 'release_annotation_export');
+    else assert.equal(calls.at(-1), failedTool);
+  });
+}
+
+test('接続例は解放のエラーJSONを警告として保持し、取得済みファイルを成功のまま残す', async t => {
+  const outputDirectory = await outputRoot(t);
+  const { result } = await runConnectionExample(outputDirectory, (name, value) => JSON.stringify(
+    name === 'release_annotation_export' ? { error: { code: 'INTERNAL_ERROR', message: '解放を完了できません' } } : value));
+  assert.equal(result.outcome, 'files_verified');
+  assert.match(result.releaseWarning, /INTERNAL_ERROR.*解放を完了できません/);
+  assert.deepEqual(await readFile(result.files.png.path), png);
+  assert.deepEqual(await readFile(result.files.json.path), json);
+});
+
+test('読取りと解放の両方のエラーJSONを失わず、不完全ファイルだけを削除する', async t => {
+  const outputDirectory = await outputRoot(t);
+  const sentinelPath = join(outputDirectory, 'keep.txt');
+  await writeFile(sentinelPath, 'keep');
+  const tools = mockTools();
+  await assert.rejects(receiveAnnotationExport({ expectedRevision: 7, outputDirectory,
+    callTool: async (name, input) => {
+      if (name === 'read_annotation_export') return { error: { code: 'EXPORT_UNAVAILABLE', message: '出力が無効です' } };
+      if (name === 'release_annotation_export') return { error: { code: 'INTERNAL_ERROR', message: '解放できません' } };
+      return tools.callTool(name, input);
+    }
+  }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.deepEqual(error.errors.map(item => item.code), ['EXPORT_UNAVAILABLE', 'INTERNAL_ERROR']);
+    return true;
+  });
+  assert.deepEqual(await readdir(outputDirectory), ['keep.txt']);
+  assert.equal(await readFile(sentinelPath, 'utf8'), 'keep');
+});
+
+test('不正なエラーJSONを成功結果として扱わない', () => {
+  for (const error of [null, false, '', [], {}, { code: 'INVALID_INPUT' },
+    { code: 'INVALID_INPUT', message: '' }, { code: 'bad code', message: '失敗' }]) {
+    assert.throws(() => assertToolSuccess({ error }), /エラー結果が不正/);
+  }
+  const success = { exportId: 'released', released: false };
+  assert.equal(assertToolSuccess(success), success);
+});
+
+test('取消しなどの拒否理由がfalse・0・空文字・nullでも受信失敗を見落とさず、後処理する', async t => {
+  const outputDirectory = await outputRoot(t);
+  for (const reason of [false, 0, '', null]) {
+    for (const failedTool of ['prepare_annotation_export', 'read_annotation_export']) {
+      const tools = mockTools();
+      await assert.rejects(receiveAnnotationExport({ expectedRevision: 7, outputDirectory,
+        callTool: (name, input) => name === failedTool ? Promise.reject(reason) : tools.callTool(name, input)
+      }), error => error === reason);
+      assert.deepEqual(await readdir(outputDirectory), []);
+      if (failedTool === 'read_annotation_export') assert.equal(tools.calls.at(-1).name, 'release_annotation_export');
+      else assert.deepEqual(tools.calls, []);
+    }
+  }
 });
